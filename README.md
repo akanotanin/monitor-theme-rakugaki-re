@@ -1,6 +1,6 @@
 # rakugaki re
 
-![rakugaki re](preview.png?v=1)
+![rakugaki re](preview.png?v=2)
 
 极简探针（Monitor）的第三方主题。整站是一本摊开的手绘笔记本：奶白纸面铺着淡蓝横格线、
 左侧一条红色页边线，所有框线都是虚线手绘的，卡片角上贴着胶带，服务器钉在一张手绘的
@@ -12,7 +12,7 @@
 
 | **涂鸦卡片（默认）** | **清单表格** |
 |:---:|:---:|
-| ![涂鸦卡片](preview.png?v=1) | ![清单表格](preview-checklist.png?v=1) |
+| ![涂鸦卡片](preview.png?v=2) | ![清单表格](preview-checklist.png?v=2) |
 
 ## 设计概念
 

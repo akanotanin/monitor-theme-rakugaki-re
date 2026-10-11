@@ -6,13 +6,14 @@
 //   node tools/preview_rename_proxy.mjs --dist <仓库根> --up http://127.0.0.1:<隧道端口> \
 //        --prefixes <仓库外的前缀清单文件> [--sibling /chicken/] [--out-dir <目录>] [--only <形态>]
 //
-// 前缀清单是一个每行一个的文本文件（只在仓库外，**绝不能提交**）：
-//   Kirino
-//   V.PS
+// 前缀清单是一个每行一个的文本文件（只在仓库外，**绝不能提交**），一行一个待抹掉的分段：
+//   Vendor-A
+//   Vendor-B
 //   ...
 //
 // 形态清单取自仓库 theme.json 里 cardStyle 那一项的 options（自动跟着主题走，不用手改）。
 // 视口宽度固定 1440、DPR 2；高度**按内容自适应**（量最后一张卡片/表格行的底边 + 40px 再收视口）。
+// 拍摄口径：涂鸦卡片那张露着地图拍（config.mapOn=true）；清单保持纯列表、不展开行。
 // 输出：doodle → preview.png、checklist → preview-checklist.png、其余 preview-<形态>.png。
 import { spawn } from 'node:child_process'
 import { mkdirSync, existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
@@ -137,7 +138,9 @@ const SETTLED = `(() => {
 })()`
 
 for (const style of STYLES) {
-  await fetch(`http://127.0.0.1:${PORT}/__config?c=${encodeURIComponent(JSON.stringify({ cardStyle: style }))}`)
+  // 拍摄口径：涂鸦卡片露着地图拍；清单保持纯列表（不展开行）。
+  const SHOT_CONFIG = style === 'doodle' ? { cardStyle: style, mapOn: true } : { cardStyle: style }
+  await fetch(`http://127.0.0.1:${PORT}/__config?c=${encodeURIComponent(JSON.stringify(SHOT_CONFIG))}`)
   await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1400, deviceScaleFactor: 2, mobile: false })
   await send('Page.navigate', { url: `http://127.0.0.1:${PORT}/?m=${style}` })
   const ok = await waitFor(SETTLED)
