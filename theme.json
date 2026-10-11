@@ -1,10 +1,10 @@
 {
-  "name": "rakugaki",
-  "short": "rakugaki2",
+  "name": "rakugaki re",
+  "short": "rakugaki-re",
   "description": "极简探针（Monitor）的手绘涂鸦本主题：整站是一本摊开的笔记本 —— 虚线手绘边框、标记笔配色、胶带与图钉，节点钉在一张手绘的世界地图上。",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "author": "akanotanin",
-  "url": "",
+  "url": "https://github.com/akanotanin/monitor-theme-rakugaki-re",
   "config": [
     {
       "type": "title",

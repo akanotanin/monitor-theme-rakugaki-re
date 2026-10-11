@@ -8,7 +8,7 @@ import { cardStyleOrNull, DEFAULTS, normalizeConfig, type ThemeConfig } from "@/
  * 后台「主题设置」表单按 theme.json 的 `config` 现画，两边靠 key 对上；默认值与收窄规则
  * 在 `site-settings.ts`（那里能单测），`scripts/check-config.mjs` 在打包前兜底。
  */
-const SHORT = "rakugaki2"
+const SHORT = "rakugaki-re"
 
 /**
  * 访客自己的两个偏好：**看不看节点地图**、**列表用哪种卡片形态**。都只存在他自己浏览器里，
@@ -19,8 +19,8 @@ const SHORT = "rakugaki2"
  * 那一页都还在；地图是一整块功能。站长在「主题设置 → 节点地图」里关掉 = **这一块关着**
  * （地图不渲染、顶栏那枚开关也不出现，见 `useMapVisible` 的注释）。
  */
-const MAP_KEY = "rakugaki2:map"
-const CARD_STYLE_KEY = "rakugaki2:card_style"
+const MAP_KEY = "rakugaki-re:map"
+const CARD_STYLE_KEY = "rakugaki-re:card_style"
 
 /**
  * 节点地图看不看：站长在「主题设置 → 节点地图」里那一档是**闸门**，访客的偏好只在闸门开着时

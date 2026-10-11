@@ -1,6 +1,9 @@
-// 公开站验收：对着线上 URL 跑 headless Chrome（走本机系统代理），
-// 读 DOM 事实 + 拍亮/暗/手机三张图。判据挂主题自己的 data-* 锚点。
-// 用法：node tools/verify_live.mjs <baseUrl> <输出目录>
+// 公开站验收：对着线上 URL 跑 headless Chrome，读 DOM 事实 + 拍亮/暗/手机三张图。
+// 判据挂主题自己的 data-* 锚点（换实现时先看这里）。
+//
+// 站点在 CDN 后面、本机要走代理时给 PROXY 环境变量（如 PROXY=http://127.0.0.1:2080）；
+// 不设就按本机 Chrome 自己的策略走。
+// 用法：PROXY=... node tools/verify_live.mjs <baseUrl> <输出目录>
 import { spawn } from 'node:child_process'
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { setTimeout as sleep } from 'node:timers/promises'
@@ -22,7 +25,7 @@ const chrome = spawn(CHROME, [
   '--no-first-run', '--no-default-browser-check', '--disable-gpu', '--hide-scrollbars',
   '--disable-background-timer-throttling', '--disable-backgrounding-occluded-windows',
   '--disable-renderer-backgrounding',
-  '--proxy-server=http://127.0.0.1:2080',
+  ...(process.env.PROXY ? [`--proxy-server=${process.env.PROXY}`] : []),
   '--user-data-dir=' + (process.env.LOCALAPPDATA || '/tmp') + '/Temp/rklive' + DPORT,
   '--window-size=1440,980', 'about:blank',
 ], { stdio: 'ignore' })
@@ -60,9 +63,6 @@ const READY = `(() => {
 const FACTS = `(() => {
   const q = (s) => document.querySelector(s)
   const tools = [...document.querySelectorAll('.header-tools > *')].map((el) => el.getAttribute('title') || el.textContent.trim())
-  const credit = q('.dg-credit')
-  const footer = q('footer')
-  const blog = q('a[data-komari-blog]')
   const js = performance.getEntriesByType('resource').map((e) => e.name).filter((n) => /\\/assets\\/.*\\.js/.test(n))
   const meta = q('meta[name="theme-color"]')
   return {
@@ -72,9 +72,6 @@ const FACTS = `(() => {
     rows: document.querySelectorAll('.dg-row').length,
     pins: document.querySelectorAll('.dg-pin').length,
     headerTools: tools,
-    creditDisplay: credit ? getComputedStyle(credit).display : '(no .dg-credit)',
-    footerVisible: footer ? !!(footer.offsetParent || footer.getClientRects().length) : '(no footer)',
-    blogHref: blog ? blog.getAttribute('href') : null,
     farmEntry: !!q('a[title="养鸡场"]'),
     fontShantell: document.fonts.check('16px "Shantell Sans"'),
     fontCaveat: document.fonts.check('16px "Caveat"'),

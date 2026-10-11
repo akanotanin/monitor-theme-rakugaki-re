@@ -20,7 +20,7 @@
 ;(function () {
   // 验收用：这个文件执行到的时刻。
   window.__probeRanAt = Math.round(performance.now())
-  var KEY = "rakugaki2:site_name"
+  var KEY = "rakugaki-re:site_name"
   // 谁贴上的：inline（index.html 那段）/ cache（本文件用缓存）/ fetch（本文件早问回来的）。
   var mark = function (source) { if (!window.__titleProbeSource) window.__titleProbeSource = source }
   var cached = null

@@ -53,7 +53,7 @@ createServer((req, res) => {
       return req.pipe(proxied)
     }
     const body =
-      path === '/api/me' ? { authed: false, github: false, public_page: true, site: `http://127.0.0.1:${PORT}`, site_name: 'rakugaki2 本地' } :
+      path === '/api/me' ? { authed: false, github: false, public_page: true, site: `http://127.0.0.1:${PORT}`, site_name: 'rakugaki re 本地' } :
       path === '/api/nodes' ? NODES :
       path.endsWith('/config') ? CONFIG :
       path === '/api/version' ? { version: '1.3.0' } : {}

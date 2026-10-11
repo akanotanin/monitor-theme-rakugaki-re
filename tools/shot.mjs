@@ -3,7 +3,7 @@
 //
 // 用法：
 //   node tools/shot.mjs <上游hub> [输出目录] [config JSON]
-//   node tools/shot.mjs http://127.0.0.1:28085 shots/rakugaki2 '{"listTop":"both"}'
+//   node tools/shot.mjs http://127.0.0.1:28085 shots/rakugaki-re '{"listTop":"both"}'
 //
 // 上游 hub 只监听回环时先在别处起隧道：
 //   ssh -f -N -L 28085:127.0.0.1:28080 <hub 所在机器>

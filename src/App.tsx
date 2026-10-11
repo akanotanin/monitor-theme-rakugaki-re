@@ -24,11 +24,10 @@ type Me = {
 
 // The tab title cache key, shared with the inline script in index.html. Kept as the
 // theme's own key so two themes on one origin cannot fight over it.
-const TITLE_CACHE_KEY = "rakugaki2:site_name"
+const TITLE_CACHE_KEY = "rakugaki-re:site_name"
 
 // 页脚署名里指向的源码仓库 —— 与 theme.json 的 `url` 是同一个地址。
-// 这一版还没建仓库：置空串 = 署名那一行不画链接（面板上也不画「更新/源码」按钮）。
-const REPO_URL = ""
+const REPO_URL = "https://github.com/akanotanin/monitor-theme-rakugaki-re"
 
 // Split out because the list page draws no chart: the detail view (with its own
 // hand-drawn charts) travels as its own chunk. 取它的时机见 App 里的 warmDetail：
@@ -437,9 +436,9 @@ export default function App() {
         <p className="dg-credit text-center">
           Theme:{" "}
           {REPO_URL ? (
-            <a href={REPO_URL} target="_blank" rel="noreferrer">Rakugaki</a>
+            <a href={REPO_URL} target="_blank" rel="noreferrer">rakugaki re</a>
           ) : (
-            <span>Rakugaki</span>
+            <span>rakugaki re</span>
           )}
         </p>
       </footer>

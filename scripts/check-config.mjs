@@ -41,7 +41,7 @@ if (problems.length) throw new Error(`设置项默认值两边不一致：\n  ${
 console.log(`设置项默认值一致：${fields.map((f) => `${f.key}=${f.default}`).join('、')}`)
 
 const CACHES = [
-  { what: '站名', key: 'rakugaki2:site_name', places: [
+  { what: '站名', key: 'rakugaki-re:site_name', places: [
     ['src/App.tsx', /TITLE_CACHE_KEY\s*=\s*"([^"]+)"/g],
     ['public/title-probe.js', /var KEY\s*=\s*"([^"]+)"/g],
     ['index.html', /localStorage\.getItem\("([^"]+)"\)/g],
