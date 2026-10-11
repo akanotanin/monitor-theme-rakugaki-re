@@ -97,8 +97,10 @@ export function SketchCheck({ checked, onChange, children }: { checked: boolean;
       onClick={() => onChange(!checked)}
       className="tap flex items-center gap-1.5 text-[12px] text-ink-3 hover:text-ink"
     >
-      <span className={`dg-check !h-[17px] !w-[17px] ${checked ? "" : "text-transparent"}`} aria-hidden="true">
-        <Check />
+      {/* 勾不勾按条件渲染 —— 别用 text-transparent 藏：.dg-check 是未分层 CSS（color 就是 teal），
+          按级联层规则它压过分层的工具类，透明写上去也不生效，结果未勾选也一直显勾。 */}
+      <span className="dg-check !h-[17px] !w-[17px]" aria-hidden="true">
+        {checked && <Check />}
       </span>
       {children}
     </button>

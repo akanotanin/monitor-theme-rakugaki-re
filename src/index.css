@@ -520,9 +520,11 @@
   border-radius: 2px;
   pointer-events: none;
 }
+/* 网速那列给 max-content 兜底：MB/s 级读数（「↓ 3.0 MB/s ↑ 3.0 MB/s」）比 128px 宽一线，
+   固定宽会把尾字截掉（`.dg-row-head` 与它同一套网格，必须一起改）。 */
 .dg-row {
   display: grid;
-  grid-template-columns: 26px minmax(0, 1fr) 92px 92px 92px 128px 92px;
+  grid-template-columns: 26px minmax(0, 1fr) 92px 92px 92px minmax(128px, max-content) 92px;
   gap: 14px;
   align-items: center;
   padding: 9px 16px;
@@ -535,7 +537,7 @@
 .dg-row:active { background: var(--yellow-soft); transform: translate(1px, 1px); }
 .dg-row-head {
   display: grid;
-  grid-template-columns: 26px minmax(0, 1fr) 92px 92px 92px 128px 92px;
+  grid-template-columns: 26px minmax(0, 1fr) 92px 92px 92px minmax(128px, max-content) 92px;
   gap: 14px;
   align-items: center;
   padding: 4px 16px 8px;
@@ -576,9 +578,9 @@
   text-underline-offset: 4px;
 }
 
-/* 清单行的「展开的下拉」：点一行在它下面翻出来的那一块 —— 只有这台机器的三网延迟，
-   数据点开才取（见 LatencyPanel）。左右内边距与行对齐（桌面 16px、窄屏 12px），
-   上下缘的分隔交给 LatencyPanel 自带的虚线。 */
+/* 清单行的「展开的下拉」：点一行在它下面翻出来的那一块 —— 时间范围 + 延迟走势图 +
+   丢包图例（见 LatencyFold，与详情页共用零件与懒加载 chunk），数据点开才取。
+   左右内边距与行对齐（桌面 16px、窄屏 12px）。 */
 .dg-fold { padding: 0 16px 12px; }
 @media (max-width: 767px) {
   .dg-fold { padding: 0 12px 10px; }
