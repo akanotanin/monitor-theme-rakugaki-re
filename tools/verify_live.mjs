@@ -144,8 +144,22 @@ for (let i = 0; i < 30 && !hasRows; i++) { await sleep(500); hasRows = !!(await 
 if (hasRows) {
   await evalJS(`document.querySelectorAll('.dg-row')[0].click()`)
   let opened = false
-  for (let i = 0; i < 16 && !opened; i++) { await sleep(350); opened = !!(await evalJS(`document.querySelector('[data-fold] [data-latency]') !== null`)) }
-  check('清单：点整行展开延迟块', opened === true)
+  for (let i = 0; i < 30 && !opened; i++) { await sleep(450); opened = !!(await evalJS(`document.querySelector('[data-fold] [data-chart] path') !== null`)) }
+  check('清单：点整行展开延迟面板（走势图已画出）', opened === true)
+  const parts = await evalJS(`(() => {
+    const fold = document.querySelector('[data-fold]')
+    if (!fold) return null
+    const ranges = [...fold.querySelectorAll('[aria-label="时间范围"] button')]
+    const legend = [...fold.querySelectorAll('button[aria-pressed]')].filter((b) => !ranges.includes(b))
+    return {
+      ranges: ranges.length,
+      active: ranges.filter((b) => b.getAttribute('aria-pressed') === 'true').length,
+      despike: !!fold.querySelector('[role="checkbox"]'),
+      fullDetail: [...fold.querySelectorAll('button')].some((b) => b.textContent.includes('完整详情')),
+      legend: legend.length,
+    }
+  })()`)
+  check('清单：展开块含范围/削峰/完整详情/图例', !!parts && parts.ranges >= 4 && parts.active === 1 && parts.despike && parts.fullDetail && parts.legend >= 1, JSON.stringify(parts))
   const aria = await evalJS(`document.querySelector('.dg-row[aria-expanded="true"]') !== null`)
   check('清单：展开行 aria-expanded=true', aria === true)
   await evalJS(`(document.querySelectorAll('.dg-row')[1] || document.querySelectorAll('.dg-row')[0]).click()`)

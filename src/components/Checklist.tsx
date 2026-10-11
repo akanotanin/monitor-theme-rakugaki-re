@@ -1,11 +1,13 @@
-import { useState } from "react"
+import { lazy, Suspense, useState } from "react"
 import { Check, X } from "lucide-react"
 
-import { LatencyPanel } from "@/components/Latency"
 import { Country, deployed, monthUsage } from "@/components/NodeCard"
 import type { Node } from "@/lib/api"
 import { FOREVER, bytes, percent, rate } from "@/lib/format"
 import { cn } from "@/lib/utils"
+
+// 展开块（延迟面板）与详情页共用**同一个懒加载 chunk** —— 清单悬停预热的就是它。
+const LatencyFold = lazy(() => import("@/components/NodeDetail").then((m) => ({ default: m.LatencyFold })))
 
 /**
  * 「清单表格」形态：一页撕下来的待办清单 —— 一台机器一行，勾选框 + 名称 +
@@ -14,16 +16,16 @@ import { cn } from "@/lib/utils"
  * 同一套「一台机器至少还有名字与状态」的取舍。
  *
  * 两种点法分别去两处（站长定的交互）：
- *   ① 点整行 = 选中这一行、在它下面翻出「三网延迟」那一块（再点收起；点开另一行会收起它）。
- *      延迟数据点开才取 —— 不展开的行一个字节都不多花（LatencyPanel 自己的三并发队列照旧）；
+ *   ① 点整行 = 选中这一行、在它下面翻出「延迟面板」——时间范围 + 延迟走势图 + 丢包图例
+ *      （与详情页同一套零件，见 LatencyFold）。数据点开才取，不展开的行一个字节都不发；
  *   ② 点**名字** = 进这台机器的详情页（名字是真链接：新标签/中键打开照常，站内导航走 onOpen）。
  */
-export function Checklist({ nodes, onOpen, onWarm, latencyLines }: {
+export function Checklist({ nodes, onOpen, onWarm, historyDays }: {
   nodes: Node[]
   onOpen: (id: number) => void
   onWarm?: () => void
-  /** 展开行里显示哪几条延迟线路（ping 任务名，换行分隔）；空串 = 自动取前三条。 */
-  latencyLines: string
+  /** hub 的历史保留天数：展开块里那排时间范围的档位按它生成（见 @/lib/ranges）。 */
+  historyDays?: number
 }) {
   // 单开：一次只翻一行 —— 开着十行延迟的清单就不再是「一屏扫完」的清单了。
   const [openId, setOpenId] = useState<number | null>(null)
@@ -44,7 +46,7 @@ export function Checklist({ nodes, onOpen, onWarm, latencyLines }: {
           node={node}
           onOpen={() => onOpen(node.id)}
           onWarm={onWarm}
-          latencyLines={latencyLines}
+          historyDays={historyDays}
           open={openId === node.id}
           onToggle={() => setOpenId((cur) => (cur === node.id ? null : node.id))}
         />
@@ -72,11 +74,11 @@ function MiniBar({ pct, tone }: { pct: number | null; tone: "red" | "teal" | "bl
   )
 }
 
-function Row({ node, onOpen, onWarm, latencyLines, open, onToggle }: {
+function Row({ node, onOpen, onWarm, historyDays, open, onToggle }: {
   node: Node
   onOpen: () => void
   onWarm?: () => void
-  latencyLines: string
+  historyDays?: number
   /** 这一行展开着没有（同一时刻最多一行，由 Checklist 的 openId 决定）。 */
   open: boolean
   onToggle: () => void
@@ -159,11 +161,13 @@ function Row({ node, onOpen, onWarm, latencyLines, open, onToggle }: {
           {node.online ? <span className="text-teal-ink">在线</span> : live ? <span className="text-red-ink">离线</span> : <span className="text-ink-4">未接入</span>}
         </span>
       </div>
-      {/* 展开的下拉部分：这台机器的三网延迟。挂载即取数（LatencyPanel 内建 60s TTL），
-          收起就卸载、不再占用它的三并发队列。 */}
+      {/* 展开的下拉部分：延迟面板（时间范围 + 走势图 + 图例，见 LatencyFold）。挂载即取数、
+          收起即卸载；chunk 与详情页共用（悬停这一行时预热的就是它）。 */}
       {open && (
         <div data-fold="" className="dg-fold">
-          <LatencyPanel node={node} lines={latencyLines} empty="这台机器暂时没有延迟数据" />
+          <Suspense fallback={<div className="dg-skel mt-1 h-40" aria-busy="true" />}>
+            <LatencyFold node={node} historyDays={historyDays} onOpenDetail={onOpen} />
+          </Suspense>
         </div>
       )}
     </>

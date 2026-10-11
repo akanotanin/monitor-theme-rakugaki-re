@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react"
-import { ArrowLeft, Check } from "lucide-react"
+import { ArrowLeft, Check, ChevronRight } from "lucide-react"
 
 import { PingTooltip } from "@/components/ChartTooltip"
 import { TimeChart } from "@/components/DoodleChart"
@@ -121,6 +121,53 @@ function despikeWindow(points: { ts: number }[]): number {
   return Math.min(15, Math.max(3, Math.round(420 / step) | 1))
 }
 
+/** 样本 → 每个探测一条线（超时保留；丢包取 hub 算好的整窗值）。详情页与清单展开共用。 */
+type PingSeries = { id: number; name: string; points: PingPoint[]; loss: number }
+
+function toPingSeries(data: { ping?: PingPoint[]; probes?: Probes; loss?: Loss } | null): PingSeries[] {
+  return [...new Set((data?.ping ?? []).map((p) => p.task_id))]
+    .map((id) => {
+      // Timeouts are retained: dropping them would draw a probe losing half its
+      // packets as an unbroken line, and one that never answered not at all.
+      const points = (data?.ping ?? []).filter((p) => p.task_id === id)
+      // Taken from the hub rather than summed from the buckets above.
+      const loss = data?.loss?.[id] ?? 0
+      return { id, name: data?.probes?.[id] ?? `探测 ${id}`, points, loss }
+    })
+    .filter((s) => s.points.length > 0)
+}
+
+/**
+ * 每条线摊成按时间戳归并的行（`t/s` 曲线、`l` 丢包、`b/c` 区间几列）。
+ * The hub stamps every sample with its bucket, so probes reporting at the
+ * bucket's rate share rows instead of each contributing its own.
+ * 详情页与清单展开共用。
+ */
+function toPingRows(pingSeries: PingSeries[]) {
+  const rows = new Map<number, { ts: number } & Record<string, number | [number, number] | null>>()
+  for (const s of pingSeries) {
+    const windowSize = despikeWindow(s.points)
+    const smoothed = despike(s.points.map((p) => p.latency), windowSize)
+    const lo = despike(s.points.map((p) => p.band?.[0] ?? p.latency), windowSize)
+    const hi = despike(s.points.map((p) => p.band?.[1] ?? p.latency), windowSize)
+    s.points.forEach((p, i) => {
+      const row = rows.get(p.ts) ?? { ts: p.ts * 1_000 }
+      row[`t${s.id}`] = p.latency
+      row[`s${s.id}`] = smoothed[i]
+      row[`l${s.id}`] = p.loss ?? 0
+      // A bucket with a single answer carries no band and spans only that answer.
+      row[`b${s.id}`] = p.band ?? (p.latency === null ? null : [p.latency, p.latency])
+      const [low, high] = [lo[i], hi[i]]
+      row[`c${s.id}`] =
+        low === null || high === null
+          ? null
+          : [Math.min(low, high, smoothed[i] ?? low), Math.max(low, high, smoothed[i] ?? high)]
+      rows.set(p.ts, row)
+    })
+  }
+  return [...rows.values()].sort((a, b) => a.ts - b.ts)
+}
+
 function Panel({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div>
@@ -206,20 +253,7 @@ export function NodeDetail({ node, onBack, historyDays, remarkPlacement }: {
 
   const m = node.metrics
   // One series per probe that reported, labelled from the names the samples arrived with.
-  const pingSeries = useMemo(
-    () =>
-      [...new Set((data?.ping ?? []).map((p) => p.task_id))]
-        .map((id) => {
-          // Timeouts are retained: dropping them would draw a probe losing half its
-          // packets as an unbroken line, and one that never answered not at all.
-          const points = (data?.ping ?? []).filter((p) => p.task_id === id)
-          // Taken from the hub rather than summed from the buckets above.
-          const loss = data?.loss?.[id] ?? 0
-          return { id, name: data?.probes?.[id] ?? `探测 ${id}`, points, loss }
-        })
-        .filter((s) => s.points.length > 0),
-    [data],
-  )
+  const pingSeries = useMemo(() => toPingSeries(data), [data])
 
   // The hub answers in seconds; the time axis requires milliseconds.
   const metricRows = useMemo(
@@ -245,30 +279,7 @@ export function NodeDetail({ node, onBack, historyDays, remarkPlacement }: {
 
   // The hub stamps every sample with its bucket, so probes reporting at the
   // bucket's rate share rows instead of each contributing its own.
-  const pingRows = useMemo(() => {
-    const rows = new Map<number, { ts: number } & Record<string, number | [number, number] | null>>()
-    for (const s of pingSeries) {
-      const windowSize = despikeWindow(s.points)
-      const smoothed = despike(s.points.map((p) => p.latency), windowSize)
-      const lo = despike(s.points.map((p) => p.band?.[0] ?? p.latency), windowSize)
-      const hi = despike(s.points.map((p) => p.band?.[1] ?? p.latency), windowSize)
-      s.points.forEach((p, i) => {
-        const row = rows.get(p.ts) ?? { ts: p.ts * 1_000 }
-        row[`t${s.id}`] = p.latency
-        row[`s${s.id}`] = smoothed[i]
-        row[`l${s.id}`] = p.loss ?? 0
-        // A bucket with a single answer carries no band and spans only that answer.
-        row[`b${s.id}`] = p.band ?? (p.latency === null ? null : [p.latency, p.latency])
-        const [low, high] = [lo[i], hi[i]]
-        row[`c${s.id}`] =
-          low === null || high === null
-            ? null
-            : [Math.min(low, high, smoothed[i] ?? low), Math.max(low, high, smoothed[i] ?? high)]
-        rows.set(p.ts, row)
-      })
-    }
-    return [...rows.values()].sort((a, b) => a.ts - b.ts)
-  }, [pingSeries])
+  const pingRows = useMemo(() => toPingRows(pingSeries), [pingSeries])
 
   // 延迟 tooltip 要按时间戳回查整行（丢包率挂在同一行的另一列上）。
   const rowByTs = useMemo(() => new Map(pingRows.map((row) => [row.ts, row])), [pingRows])
@@ -507,6 +518,166 @@ export function NodeDetail({ node, onBack, historyDays, remarkPlacement }: {
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+/**
+ * 清单行展开的那块「延迟面板」（站长 2026-10-11 要的形态，参考图：时间范围 + 走势图 + 图例）：
+ * 范围 chip + 削峰 + 右侧「完整详情 ›」；下面一张多条线路同轴的延迟走势图（超时断开）；
+ * 图例点一下藏/显那条线，丢包率缀在名字后面。
+ *
+ * 与详情页同一套零件（Chip / SketchCheck / TimeChart / PingTooltip / PALETTE），也住在
+ * **同一个懒加载 chunk** 里 —— 清单悬停时预热的就是它，展开时几乎立刻能画（本组件只被
+ * 清单按需挂载：不展开的行一个字节都不发）。拖选缩放是「完整详情」的活，这里不放。
+ */
+export function LatencyFold({ node, historyDays, onOpenDetail }: {
+  node: Node
+  /** hub 的历史保留天数（`/api/me` 的 `history_days`）；老 hub 不给，按 7 天算（见 @/lib/ranges）。 */
+  historyDays?: number
+  /** 「完整详情 ›」：进这台机器的整页详情。 */
+  onOpenDetail: () => void
+}) {
+  const RANGES = rangesFor(historyDays)
+  const [hours, setHours] = useState(6)
+  const [smooth, setSmooth] = useState(false)
+  // 点图例藏/显那条线（与详情页同一口径）。
+  const [hiddenProbes, setHiddenProbes] = useState<number[]>([])
+  const [data, setData] = useState<{ ping: PingPoint[]; probes: Probes; loss?: Loss } | null>(null)
+  // Retained rather than folded into an empty result: a refused request and an
+  // empty window are different answers.
+  const [failed, setFailed] = useState("")
+  useEffect(() => {
+    let active = true
+    // The chart must not continue drawing the old range while the new one is in flight.
+    // oxlint-disable-next-line react/set-state-in-effect -- 换范围时先清掉上一档图，这是取数的既有语义
+    setData(null)
+    setFailed("")
+    // What this screen can resolve, in device pixels, which is the unit the line is drawn in.
+    const points = Math.round(globalThis.innerWidth * (globalThis.devicePixelRatio || 1))
+    api<{ ping: PingPoint[]; probes: Probes; loss?: Loss }>(
+      `/nodes/${node.id}/metrics?hours=${hours}&points=${points}&series=ping`,
+    )
+      .then((next) => { if (active) setData(next) })
+      .catch((e: Error) => {
+        if (active) { setFailed(e.message || "网络错误"); setData({ ping: [], probes: {} }) }
+      })
+    return () => { active = false }
+  }, [node.id, hours])
+
+  const pingSeries = useMemo(() => toPingSeries(data), [data])
+  const shownProbes = useMemo(
+    () => pingSeries.filter((s) => !hiddenProbes.includes(s.id)),
+    [pingSeries, hiddenProbes],
+  )
+  // Keyed on the full list, so a line keeps its shade when others are hidden.
+  const style = (id: number) => PALETTE[pingSeries.findIndex((p) => p.id === id) % PALETTE.length]
+  const pingRows = useMemo(() => toPingRows(pingSeries), [pingSeries])
+  const rowByTs = useMemo(() => new Map(pingRows.map((row) => [row.ts, row])), [pingRows])
+
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+        <div className="dg-tabs" role="group" aria-label="时间范围">
+          {RANGES.map((r) => (
+            <Chip key={r.hours} active={hours === r.hours} onClick={() => setHours(r.hours)}>
+              {r.label}
+            </Chip>
+          ))}
+        </div>
+        <SketchCheck checked={smooth} onChange={setSmooth}>
+          削峰
+        </SketchCheck>
+        <button
+          type="button"
+          onClick={onOpenDetail}
+          className="dg-hand tap ml-auto flex items-center gap-0.5 text-[12.5px] text-ink-3 hover:text-ink"
+        >
+          完整详情
+          <ChevronRight className="size-3.5" aria-hidden />
+        </button>
+      </div>
+
+      {!data ? (
+        <div className="dg-skel h-44 w-full" aria-busy="true" />
+      ) : failed ? (
+        <p className="py-6 text-center text-[13px] text-red-ink" role="alert">读取历史数据失败：{failed}</p>
+      ) : pingSeries.length === 0 ? (
+        <p className="dg-empty py-6 text-center">这段时间没有延迟数据</p>
+      ) : (
+        <>
+          <div className="h-44 w-full text-ink-3 sm:h-52">
+            {shownProbes.length === 0 ? (
+              <p className="py-8 text-center text-[13px]">没有选中任何探测</p>
+            ) : (
+              <TimeChart
+                rows={pingRows}
+                series={[
+                  // 区间（band）只在屏上只有一个探测时画：几条叠在一起会糊成一片。
+                  ...(shownProbes.length === 1
+                    ? shownProbes.map((s) => ({
+                        key: `${smooth ? "c" : "b"}${s.id}`,
+                        name: s.name,
+                        color: style(s.id).stroke,
+                        band: true,
+                      }))
+                    : []),
+                  ...shownProbes.map((s) => ({
+                    key: `${smooth ? "s" : "t"}${s.id}`,
+                    name: s.name,
+                    color: style(s.id).stroke,
+                    dash: style(s.id).dash,
+                  })),
+                ]}
+                hours={hours}
+                // 延迟轴不从 0 起：这些线路活在一条窄带里，锚到 0 会把起伏压平。
+                domain="auto"
+                unit="ms"
+                left={52}
+                label="节点延迟走势"
+                renderTooltip={(row) => (
+                  <PingTooltip active label={row.ts} rowByTs={rowByTs} probes={shownProbes} smooth={smooth} style={style} />
+                )}
+              />
+            )}
+          </div>
+
+          {/* 图下面那排：哪几条线在屏上（点一下藏/显），丢包率挂在名字后面。 */}
+          {(pingSeries.length > 1 || pingSeries.some((s) => s.loss > 0)) && (
+            <div className="flex flex-wrap items-center justify-center gap-1.5">
+              {pingSeries.map((s) => {
+                const shown = !hiddenProbes.includes(s.id)
+                return (
+                  <button
+                    key={s.id}
+                    type="button"
+                    aria-pressed={shown}
+                    onClick={() => setHiddenProbes((h) => (shown ? [...h, s.id] : h.filter((id) => id !== s.id)))}
+                    className={`dg-chip tap !px-2 !py-0.5 text-[12px] ${shown ? "" : "opacity-40"}`}
+                  >
+                    <svg width="14" height="6" className="shrink-0" aria-hidden>
+                      <line
+                        x1="0"
+                        y1="3"
+                        x2="14"
+                        y2="3"
+                        stroke={style(s.id).stroke}
+                        strokeDasharray={style(s.id).dash}
+                        strokeWidth="2.4"
+                      />
+                    </svg>
+                    {s.name}
+                    {/* The line is only what answered, so a probe dropping half its packets draws like a healthy one. */}
+                    {s.loss > 0 && (
+                      <span className="tnum opacity-70">丢 {s.loss < 1 ? "<1" : Math.round(s.loss)}%</span>
+                    )}
+                  </button>
+                )
+              })}
+            </div>
+          )}
+        </>
+      )}
     </div>
   )
 }

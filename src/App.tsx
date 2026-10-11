@@ -422,6 +422,7 @@ export default function App() {
               onOpen={go}
               onWarm={warmDetail}
               latencyLines={config.pingLines}
+              historyDays={me.history_days}
               cardStyle={cardStyle}
               remarkPlacement={config.remarkPlacement}
             />
@@ -484,13 +485,15 @@ function useProgressive(total: number, first = 24, step = 12): number {
   return limit
 }
 
-function NodeList({ view, group, onGroup, onOpen, onWarm, latencyLines, cardStyle, remarkPlacement }: {
+function NodeList({ view, group, onGroup, onOpen, onWarm, latencyLines, historyDays, cardStyle, remarkPlacement }: {
   view: ReturnType<typeof groupView>
   group: string | null
   onGroup: (group: string | null) => void
   onOpen: (id: number) => void
   onWarm: () => void
   latencyLines: string
+  /** hub 的历史保留天数：清单展开块那排时间范围按它生成。 */
+  historyDays?: number
   cardStyle: "doodle" | "checklist"
   remarkPlacement: RemarkPlacement
 }) {
@@ -522,7 +525,7 @@ function NodeList({ view, group, onGroup, onOpen, onWarm, latencyLines, cardStyl
       {total === 0 ? (
         <p className="dg-empty py-16 text-center">还没有节点</p>
       ) : cardStyle === "checklist" ? (
-        <Checklist nodes={list} onOpen={onOpen} onWarm={onWarm} latencyLines={latencyLines} />
+        <Checklist nodes={list} onOpen={onOpen} onWarm={onWarm} historyDays={historyDays} />
       ) : (
         <div data-card-style="doodle" className="dg-cards grid items-start gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {list.map((n) => (
