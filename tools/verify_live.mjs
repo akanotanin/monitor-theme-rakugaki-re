@@ -57,7 +57,8 @@ const READY = `(() => {
   const c = document.querySelectorAll('[data-card]').length
   const r = document.querySelectorAll('.dg-row').length
   const p = document.querySelectorAll('.dg-pin').length
-  return { ok: (c + r) >= 3 && p > 0 && document.fonts.status === 'loaded', c, r, p }
+  // 地图默认关（设置项的默认就是关）：图钉数只带出来看，不当就绪条件。
+  return { ok: (c + r) >= 3 && document.fonts.status === 'loaded', c, r, p }
 })()`
 
 const FACTS = `(() => {
@@ -160,6 +161,15 @@ if (hasRows) {
     }
   })()`)
   check('清单：展开块含范围/削峰/完整详情/图例', !!parts && parts.ranges >= 4 && parts.active === 1 && parts.despike && parts.fullDetail && parts.legend >= 1, JSON.stringify(parts))
+  // 削峰勾选态：未勾选时框里不能有对勾（svg），点一下才出现（点完还原）——
+  // 防「.dg-check 的未分层 color 压过 text-transparent」那类级联层静默失效回潮。
+  const d0 = await evalJS(`(() => { const b = document.querySelector('[data-fold] [role=checkbox]'); return { aria: b && b.getAttribute('aria-checked'), glyph: !!(b && b.querySelector('svg')) } })()`)
+  await evalJS(`document.querySelector('[data-fold] [role=checkbox]').click()`)
+  await sleep(300)
+  const d1 = await evalJS(`(() => { const b = document.querySelector('[data-fold] [role=checkbox]'); return { aria: b && b.getAttribute('aria-checked'), glyph: !!(b && b.querySelector('svg')) } })()`)
+  await evalJS(`document.querySelector('[data-fold] [role=checkbox]').click()`)
+  await sleep(300)
+  check('清单：削峰未勾选不显勾、点后出现（已还原）', d0.aria === 'false' && d0.glyph === false && d1.aria === 'true' && d1.glyph === true, JSON.stringify({ d0, d1 }))
   const aria = await evalJS(`document.querySelector('.dg-row[aria-expanded="true"]') !== null`)
   check('清单：展开行 aria-expanded=true', aria === true)
   await evalJS(`(document.querySelectorAll('.dg-row')[1] || document.querySelectorAll('.dg-row')[0]).click()`)

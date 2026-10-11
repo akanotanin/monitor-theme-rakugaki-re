@@ -56,7 +56,7 @@ eq(remarksOnDetail("card") || remarksOnDetail("none"), false, "详情侧：card 
 eq(normalizeConfig({}), DEFAULTS, "空配置 → 全默认")
 eq(normalizeConfig(null), DEFAULTS, "null → 全默认")
 eq(normalizeConfig("junk"), DEFAULTS, "非对象 → 全默认")
-eq(normalizeConfig({ mapOn: "false" }).mapOn, true, '布尔项只认真布尔："false" 字符串不算数')
+eq(normalizeConfig({ mapOn: "false" }).mapOn, false, '布尔项只认真布尔："false" 字符串不算数，落回默认（false）')
 eq(normalizeConfig({ mapOn: false }).mapOn, false, "真布尔 false 收下")
 eq(normalizeConfig({ pingLines: "" }).pingLines, "", '留空是有意义的值：空串保留（= 自动取前几条）')
 eq(normalizeConfig({ pingLines: null }).pingLines, "", "null → 回落默认（空串）")
