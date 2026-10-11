@@ -4,6 +4,8 @@
 //   node tools/serve.mjs 5199 '{"listTop":"groups","cardStyle":"compact"}'
 //   node tools/serve.mjs 5199 cfg.json ../fake_nodes.json
 //   node tools/serve.mjs 5199 '' '' http://127.0.0.1:28081     # /api/* 转给真 hub（经隧道），静态仍走本机
+//   node tools/serve.mjs 5199 '' '' https://<域名>             # 上游也可以是 https（Node 侧走代理时带
+//                                                              #   NODE_USE_ENV_PROXY=1 HTTPS_PROXY=http://127.0.0.1:2080）
 //
 // 为什么要有「上游 hub」这一档：桩数据只有节点列表，历史指标全是空对象，图表相关的断言
 // （例如延迟页签 7 天窗口）在桩上跑不出结论。把 /api/* 转给真 hub，静态文件仍走本机，
@@ -12,7 +14,7 @@
 // 为什么要它：经 SSH 隧道取静态文件时，同一个地址被并发请求（站点图标既是标签页图标、
 // 又是顶栏那枚圆标）偶发只回来一半，会让人误判成主题的问题。把静态资源换成走本机，
 // 就能把两边分开看。
-import { createServer, request } from 'node:http'
+import { createServer } from 'node:http'
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { extname, join, normalize } from 'node:path'
 
@@ -43,14 +45,30 @@ createServer((req, res) => {
       return res.end(JSON.stringify(CONFIG))
     }
     if (UPSTREAM) {
-      // 转给真 hub：方法与查询串原样带走，只把 Host 换成上游自己的。
+      // 转给真 hub：方法与查询串原样带走，body 原样转（都是小 JSON）。
+      // ★用 fetch 而不是 node:http 的 request —— 后者只认 http://，把上游直接指到 https 域名
+      // （不建隧道、直接打真站）会当场报「Protocol https: not supported」。要走代理就启动本脚本时
+      // 带 NODE_USE_ENV_PROXY=1 HTTPS_PROXY=http://127.0.0.1:2080。
       const up = new URL(UPSTREAM + path + url.search)
-      const proxied = request(up, { method: req.method, headers: { host: up.host, accept: req.headers.accept || '*/*' } }, (r) => {
-        res.writeHead(r.statusCode || 502, { 'Content-Type': r.headers['content-type'] || 'application/json', 'Cache-Control': 'no-store' })
-        r.pipe(res)
+      ;(async () => {
+        const chunks = []
+        for await (const c of req) chunks.push(c)
+        const body = Buffer.concat(chunks)
+        const r = await fetch(up, {
+          method: req.method,
+          headers: {
+            accept: req.headers.accept || '*/*',
+            ...(body.length ? { 'content-type': req.headers['content-type'] || 'application/json' } : {}),
+          },
+          body: body.length ? body : undefined,
+        })
+        res.writeHead(r.status, { 'Content-Type': r.headers.get('content-type') || 'application/json', 'Cache-Control': 'no-store' })
+        res.end(Buffer.from(await r.arrayBuffer()))
+      })().catch((e) => {
+        if (!res.headersSent) res.writeHead(502, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: String(e) }))
       })
-      proxied.on('error', (e) => { res.writeHead(502, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: String(e) })) })
-      return req.pipe(proxied)
+      return
     }
     const body =
       path === '/api/me' ? { authed: false, github: false, public_page: true, site: `http://127.0.0.1:${PORT}`, site_name: 'rakugaki re 本地' } :

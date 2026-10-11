@@ -106,5 +106,63 @@ for (const s of shots) {
   console.log(JSON.stringify(facts, null, 1))
 }
 
+// ---- 追加断言：网速行不折行（窄宽度）+ 清单行「点行展开 / 点名进详情」----
+// 都是结构断言：与具体数据无关，站点上有几台、叫什么不影响判定。
+const RESULTS = []
+const check = (name, ok, detail = '') => { RESULTS.push(ok); console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? ' — ' + detail : ''}`) }
+
+// ① 网速行：334 / 320 两个窄档不能折行（桌面 4 列同款窄卡片的回归也由这两个档露头）
+for (const w of [334, 320]) {
+  await send('Emulation.setDeviceMetricsOverride', { width: w, height: 880, deviceScaleFactor: 2, mobile: true })
+  await send('Page.navigate', { url: `${BASE}/` })
+  await sleep(2500)
+  const rows = await evalJS(`(() => {
+    const out = []
+    for (const c of document.querySelectorAll('[data-card="doodle"]')) {
+      const net = c.querySelector('[data-net]'); if (!net) continue
+      const spans = [...net.querySelectorAll(':scope > span')]
+      const ys = spans.map(s => s.getBoundingClientRect().y)
+      out.push({ name: c.querySelector('h3')?.textContent, box: +net.getBoundingClientRect().width.toFixed(1), wrapped: ys.length > 1 && Math.abs(ys[0] - ys[ys.length - 1]) > 4 })
+    }
+    return out
+  })()`)
+  if (Array.isArray(rows) && rows.length) {
+    const wrapped = rows.filter((r) => r.wrapped)
+    check(`网速行 ${w}px：全部单行（${rows.length} 张卡）`, wrapped.length === 0, wrapped.map((r) => `${r.name}[${r.box}px]`).join('; '))
+  } else {
+    console.log(`（${w}px：站点默认形态不是涂鸦卡片，跳过）`)
+  }
+}
+
+// ② 清单：点行展开延迟 / 点名字进详情。用访客偏好（localStorage）强制切到清单来看，
+//    站点配置一个字不动；跑的是真 React 组件与真接口。
+await send('Page.addScriptToEvaluateOnNewDocument', { source: `try{localStorage.setItem('rakugaki-re:card_style','checklist')}catch(e){}` })
+await send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true })
+await send('Page.navigate', { url: `${BASE}/` })
+let hasRows = false
+for (let i = 0; i < 30 && !hasRows; i++) { await sleep(500); hasRows = !!(await evalJS(`document.querySelectorAll('.dg-row').length > 0`)) }
+if (hasRows) {
+  await evalJS(`document.querySelectorAll('.dg-row')[0].click()`)
+  let opened = false
+  for (let i = 0; i < 16 && !opened; i++) { await sleep(350); opened = !!(await evalJS(`document.querySelector('[data-fold] [data-latency]') !== null`)) }
+  check('清单：点整行展开延迟块', opened === true)
+  const aria = await evalJS(`document.querySelector('.dg-row[aria-expanded="true"]') !== null`)
+  check('清单：展开行 aria-expanded=true', aria === true)
+  await evalJS(`(document.querySelectorAll('.dg-row')[1] || document.querySelectorAll('.dg-row')[0]).click()`)
+  await sleep(600)
+  const folds = await evalJS(`document.querySelectorAll('[data-fold]').length`)
+  check('清单：单开手风琴（同时只开一行）', folds === 1, `folds=${folds}`)
+  const href = await evalJS(`(() => { const a = document.querySelector('.dg-row a.dg-name-link'); if (!a) return null; const h = a.getAttribute('href'); a.click(); return h })()`)
+  await sleep(900)
+  const path = await evalJS(`location.pathname`)
+  check('清单：点名字进详情页', typeof href === 'string' && href.startsWith('/node/') && path === href, `href=${href} path=${path}`)
+} else {
+  console.log('（清单行没出来：站点数据或形态异常，跳过）')
+}
+
+const fails = RESULTS.filter((ok) => !ok).length
+console.log(`\n==== live 断言: ${RESULTS.length - fails} PASS / ${fails} FAIL ====`)
+if (fails) process.exitCode = 1
+
 chrome.kill()
 console.log('完成 →', OUT)

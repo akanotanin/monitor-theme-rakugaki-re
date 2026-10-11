@@ -522,7 +522,7 @@ function NodeList({ view, group, onGroup, onOpen, onWarm, latencyLines, cardStyl
       {total === 0 ? (
         <p className="dg-empty py-16 text-center">还没有节点</p>
       ) : cardStyle === "checklist" ? (
-        <Checklist nodes={list} onOpen={onOpen} onWarm={onWarm} />
+        <Checklist nodes={list} onOpen={onOpen} onWarm={onWarm} latencyLines={latencyLines} />
       ) : (
         <div data-card-style="doodle" className="dg-cards grid items-start gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {list.map((n) => (

@@ -410,6 +410,20 @@
 .dg-cards > :nth-child(8n+7) { --tilt: -.4deg; --tone: var(--teal);  --tone-h: var(--red);    --tape: var(--tape-r); }
 .dg-cards > :nth-child(8n)   { --tilt: .8deg;  --tone: var(--red);   --tone-h: var(--teal);   --tape: var(--tape-t); }
 
+/* 卡片底部的「速率・总量」那一行要跟着卡片的宽窄走：12px 下最坏内容
+   （`↓ 999 KB/s ↑ 999 KB/s` ＋ `↓ 1.23 TB ↑ 1.23 TB`，两个数都取到各自格式的上限）
+   需要 ~276px，而两种「窄卡片」都会撞上这道线 —— 手机上单列时视口 ≤344px、桌面上 4 列时
+   卡片内宽 ~260px —— 撞上就折成两行、右半张空白。降一档字号 + 词距收 1px 把最坏内容压到
+   ~244px：320px 的视口（还留着 ~8px 余量）到 4 列桌面都放得下一行，形态与宽卡片一致
+   （速度在左、总量在右）。word-spacing 只收 1px（试过 -2.5px：数字与箭头读起来发粘）。
+   ★用容器查询而不是媒体查询：桌面 4 列时视口很宽、卡片很窄，媒体查询看不见这种「窄卡片」。
+   查询门槛 280px 也让 3 列（内宽 ~283px，12px 放得下）保持原样。 */
+.dg-card { container-type: inline-size; }
+
+@container (max-width: 280px) {
+  [data-net="row"] { font-size: 11px; word-spacing: -1px; }
+}
+
 /* ------------------------------------------------------------------ 状态印章 */
 .dg-stamp {
   display: inline-flex;
@@ -547,6 +561,27 @@
   .dg-row-head { display: none; }
   .dg-col-wide { display: none; }
   .dg-only-narrow { display: block; }
+}
+
+/* 点开的清单行：黄色高亮笔停着不走（悬停划过的那一道这里让它也表示「选中」）。 */
+.dg-row[aria-expanded="true"] { background: var(--yellow-soft); }
+
+/* 清单里「名字」这格是进详情的链接：平时与周边一样（清单要干净），悬停才画一条波浪线。 */
+.dg-name-link { text-decoration: none; }
+.dg-name-link:hover {
+  text-decoration: underline;
+  text-decoration-style: wavy;
+  text-decoration-thickness: 1.4px;
+  text-decoration-color: var(--teal-ink);
+  text-underline-offset: 4px;
+}
+
+/* 清单行的「展开的下拉」：点一行在它下面翻出来的那一块 —— 只有这台机器的三网延迟，
+   数据点开才取（见 LatencyPanel）。左右内边距与行对齐（桌面 16px、窄屏 12px），
+   上下缘的分隔交给 LatencyPanel 自带的虚线。 */
+.dg-fold { padding: 0 16px 12px; }
+@media (max-width: 767px) {
+  .dg-fold { padding: 0 12px 10px; }
 }
 
 /* ------------------------------------------------------------------ 概览便签（小抄）

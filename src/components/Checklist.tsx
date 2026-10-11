@@ -1,5 +1,7 @@
+import { useState } from "react"
 import { Check, X } from "lucide-react"
 
+import { LatencyPanel } from "@/components/Latency"
 import { Country, deployed, monthUsage } from "@/components/NodeCard"
 import type { Node } from "@/lib/api"
 import { FOREVER, bytes, percent, rate } from "@/lib/format"
@@ -10,12 +12,21 @@ import { cn } from "@/lib/utils"
  * 三根小读数条 + 网速 + 状态；鼠标扫过时整行被黄高亮笔划一道（见 .dg-row:hover）。
  * 宽度不够时（<768px）读数条与网速列收起，收进名称下面那行小字里 —— 与卡片形态
  * 同一套「一台机器至少还有名字与状态」的取舍。
+ *
+ * 两种点法分别去两处（站长定的交互）：
+ *   ① 点整行 = 选中这一行、在它下面翻出「三网延迟」那一块（再点收起；点开另一行会收起它）。
+ *      延迟数据点开才取 —— 不展开的行一个字节都不多花（LatencyPanel 自己的三并发队列照旧）；
+ *   ② 点**名字** = 进这台机器的详情页（名字是真链接：新标签/中键打开照常，站内导航走 onOpen）。
  */
-export function Checklist({ nodes, onOpen, onWarm }: {
+export function Checklist({ nodes, onOpen, onWarm, latencyLines }: {
   nodes: Node[]
   onOpen: (id: number) => void
   onWarm?: () => void
+  /** 展开行里显示哪几条延迟线路（ping 任务名，换行分隔）；空串 = 自动取前三条。 */
+  latencyLines: string
 }) {
+  // 单开：一次只翻一行 —— 开着十行延迟的清单就不再是「一屏扫完」的清单了。
+  const [openId, setOpenId] = useState<number | null>(null)
   return (
     <div className="dg-list" data-card="checklist">
       <div className="dg-row-head" aria-hidden="true">
@@ -28,7 +39,15 @@ export function Checklist({ nodes, onOpen, onWarm }: {
         <span className="dg-hand">状态</span>
       </div>
       {nodes.map((node) => (
-        <Row key={node.id} node={node} onOpen={() => onOpen(node.id)} onWarm={onWarm} />
+        <Row
+          key={node.id}
+          node={node}
+          onOpen={() => onOpen(node.id)}
+          onWarm={onWarm}
+          latencyLines={latencyLines}
+          open={openId === node.id}
+          onToggle={() => setOpenId((cur) => (cur === node.id ? null : node.id))}
+        />
       ))}
     </div>
   )
@@ -53,7 +72,15 @@ function MiniBar({ pct, tone }: { pct: number | null; tone: "red" | "teal" | "bl
   )
 }
 
-function Row({ node, onOpen, onWarm }: { node: Node; onOpen: () => void; onWarm?: () => void }) {
+function Row({ node, onOpen, onWarm, latencyLines, open, onToggle }: {
+  node: Node
+  onOpen: () => void
+  onWarm?: () => void
+  latencyLines: string
+  /** 这一行展开着没有（同一时刻最多一行，由 Checklist 的 openId 决定）。 */
+  open: boolean
+  onToggle: () => void
+}) {
   const m = node.metrics
   const live = deployed(node)
   const cpuPct = m ? m.cpu : null
@@ -61,55 +88,84 @@ function Row({ node, onOpen, onWarm }: { node: Node; onOpen: () => void; onWarm?
   const diskPct = m ? percent(m.disk_used, m.disk_total) : null
   const traffic = node.traffic_limit > 0 ? `${bytes(monthUsage(node))}/${bytes(node.traffic_limit)}` : `${bytes(monthUsage(node))}/${FOREVER}`
   return (
-    <div
-      className="dg-row"
-      data-node={node.id}
-      role="button"
-      tabIndex={0}
-      onClick={onOpen}
-      onPointerOver={onWarm}
-      onFocus={onWarm}
-      onTouchStart={onWarm}
-      onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), onOpen())}
-    >
-      <span className={cn("dg-check", node.online ? "" : live ? "dg-check-off" : "text-ink-4")} aria-hidden="true">
-        {node.online ? <Check /> : live ? <X /> : <span className="text-[11px] font-bold">?</span>}
-      </span>
-      <div className="min-w-0">
-        <div className="flex min-w-0 items-center gap-2">
-          <Country node={node} />
-          <span className="dg-hand min-w-0 truncate text-[14px] font-bold">{node.name}</span>
-          {!live && <span className="shrink-0 text-[11px] text-ink-4">未接入</span>}
-        </div>
-        {/* 窄屏才出现的那两行：读数与网速收成小字，列都藏起来（见 index.css）。 */}
-        {live && (
-          <div className="dg-only-narrow tnum mt-0.5 text-[11px] leading-snug text-ink-3">
-            CPU {cpuPct === null ? "—" : `${cpuPct.toFixed(0)}%`} · 内存 {memPct === null ? "—" : `${memPct.toFixed(0)}%`} · 硬盘 {diskPct === null ? "—" : `${diskPct.toFixed(0)}%`}
-            <br />
-            {m ? `↓ ${rate(m.net_rx)} ↑ ${rate(m.net_tx)}` : "—"} · 流量 {traffic}
+    <>
+      <div
+        className="dg-row"
+        data-node={node.id}
+        role="button"
+        tabIndex={0}
+        aria-expanded={open}
+        onClick={onToggle}
+        onPointerOver={onWarm}
+        onFocus={onWarm}
+        onTouchStart={onWarm}
+        // 键盘：Enter/空格敲在行本身上才展开 —— 焦点在名字链接里时让浏览器去开详情
+        //（不拦的话两个都会触发：链接开详情、冒泡上来的这行又把它展开）。
+        onKeyDown={(e) => {
+          if (e.target !== e.currentTarget) return
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault()
+            onToggle()
+          }
+        }}
+      >
+        <span className={cn("dg-check", node.online ? "" : live ? "dg-check-off" : "text-ink-4")} aria-hidden="true">
+          {node.online ? <Check /> : live ? <X /> : <span className="text-[11px] font-bold">?</span>}
+        </span>
+        <div className="min-w-0">
+          <div className="flex min-w-0 items-center gap-2">
+            <Country node={node} />
+            {/* 名字 = 进详情的那一处（整行是「展开延迟」）。真链接，但站内点击走 SPA 路由。 */}
+            <a
+              href={`/node/${node.id}`}
+              className="dg-hand dg-name-link min-w-0 truncate text-[14px] font-bold"
+              onClick={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
+                onOpen()
+              }}
+            >
+              {node.name}
+            </a>
+            {!live && <span className="shrink-0 text-[11px] text-ink-4">未接入</span>}
           </div>
+          {/* 窄屏才出现的那两行：读数与网速收成小字，列都藏起来（见 index.css）。 */}
+          {live && (
+            <div className="dg-only-narrow tnum mt-0.5 text-[11px] leading-snug text-ink-3">
+              CPU {cpuPct === null ? "—" : `${cpuPct.toFixed(0)}%`} · 内存 {memPct === null ? "—" : `${memPct.toFixed(0)}%`} · 硬盘 {diskPct === null ? "—" : `${diskPct.toFixed(0)}%`}
+              <br />
+              {m ? `↓ ${rate(m.net_rx)} ↑ ${rate(m.net_tx)}` : "—"} · 流量 {traffic}
+            </div>
+          )}
+        </div>
+        {live ? (
+          <>
+            <MiniBar pct={cpuPct} tone="red" />
+            <MiniBar pct={memPct} tone="teal" />
+            <MiniBar pct={diskPct} tone="blue" />
+            <span className="dg-col-wide tnum truncate text-[11.5px] text-ink-2">
+              {m ? `↓ ${rate(m.net_rx)} ↑ ${rate(m.net_tx)}` : "—"}
+            </span>
+          </>
+        ) : (
+          <>
+            <span className="dg-col-wide" />
+            <span className="dg-col-wide" />
+            <span className="dg-col-wide" />
+            <span className="dg-col-wide" />
+          </>
         )}
+        <span className="dg-col-wide text-[11.5px]">
+          {node.online ? <span className="text-teal-ink">在线</span> : live ? <span className="text-red-ink">离线</span> : <span className="text-ink-4">未接入</span>}
+        </span>
       </div>
-      {live ? (
-        <>
-          <MiniBar pct={cpuPct} tone="red" />
-          <MiniBar pct={memPct} tone="teal" />
-          <MiniBar pct={diskPct} tone="blue" />
-          <span className="dg-col-wide tnum truncate text-[11.5px] text-ink-2">
-            {m ? `↓ ${rate(m.net_rx)} ↑ ${rate(m.net_tx)}` : "—"}
-          </span>
-        </>
-      ) : (
-        <>
-          <span className="dg-col-wide" />
-          <span className="dg-col-wide" />
-          <span className="dg-col-wide" />
-          <span className="dg-col-wide" />
-        </>
+      {/* 展开的下拉部分：这台机器的三网延迟。挂载即取数（LatencyPanel 内建 60s TTL），
+          收起就卸载、不再占用它的三并发队列。 */}
+      {open && (
+        <div data-fold="" className="dg-fold">
+          <LatencyPanel node={node} lines={latencyLines} empty="这台机器暂时没有延迟数据" />
+        </div>
       )}
-      <span className="dg-col-wide text-[11.5px]">
-        {node.online ? <span className="text-teal-ink">在线</span> : live ? <span className="text-red-ink">离线</span> : <span className="text-ink-4">未接入</span>}
-      </span>
-    </div>
+    </>
   )
 }

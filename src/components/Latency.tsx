@@ -180,10 +180,19 @@ function Sparkline({ values, className, seed }: { values: Array<number | null>; 
  *
  * `data-latency` 是给护栏认这一块摊没摊的锚点（按类名找会在改版后失配）。
  */
-export function LatencyPanel({ node, lines }: { node: Node; lines: string }) {
+export function LatencyPanel({ node, lines, empty }: { node: Node; lines: string; empty?: string }) {
   const probes = useNodePing(node.id)
   const rows = useMemo(() => pickRows(probes, lines), [probes, lines])
-  if (rows.length === 0) return null
+  if (rows.length === 0) {
+    // 数据还在路上（probes === null）时不占位；取回来是空的、而调用方给了 `empty`，
+    // 才画那一行说明 —— 目前只有清单的展开行传它（那里延迟是唯一内容，空着像坏了）。
+    if (!empty || probes === null) return null
+    return (
+      <div data-latency="" className="mt-3 border-t-[1.5px] border-dashed border-line-strong pt-2.5 text-[11.5px] text-ink-4">
+        {empty}
+      </div>
+    )
+  }
   return (
     <div data-latency="" className="mt-3 space-y-1 border-t-[1.5px] border-dashed border-line-strong pt-2.5">
       {rows.map((p) => {
