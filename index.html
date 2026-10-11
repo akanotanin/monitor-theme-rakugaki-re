@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- 手机浏览器那一圈（地址栏 / 状态栏）的配色。两份**静态兜底**按系统明暗挑；
+         页面起来后 App 的 useTheme 会摘掉它们、换成一份跟着**页面实际明暗**走的。
+         色值与 index.css 的 --paper 同一套：亮 #fffef5、暗（黑板）#2c302e。 -->
+    <meta name="theme-color" content="#fffef5" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#2c302e" media="(prefers-color-scheme: dark)" />
+    <!-- 站点图标：hub 1.4.0 起由面板「设置 → 站点图标」管（没设时回落到主题目录里的
+         public/favicon.svg 与 public/apple-touch-icon.png 这两份兜底）。顶栏那枚小圆标
+         也走同一个地址，浏览器只取一份。 -->
+    <link rel="icon" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <!-- 标签页标题的占位值：真站名要到 JS 里才有。沿用上游那句，别换成本主题的名字
+         （只会让刷新时标签页多闪一跳）。 -->
+    <title>Monitor</title>
+    <!-- 缓存里的站名：**必须内联**（省掉一次往返，标签页第一帧就是站名）；
+         站点前面若有 CSP 会挡掉内联脚本，下面那条外部文件照旧补上。
+         键与 src/App.tsx 的 TITLE_CACHE_KEY 一致。 -->
+    <script>
+      ;(function () {
+        var name = null
+        try {
+          name = localStorage.getItem("rakugaki2:site_name")
+        } catch (e) {
+          // 隐私模式 / 存储被禁用：没有缓存可用，占位值等下面那条外部文件。
+        }
+        if (name) {
+          document.title = name
+          window.__titleProbeSource = "inline"
+        }
+      })()
+    </script>
+    <!-- 标题的头一步（冷启动时早问一次 /api/me，兼内联被 CSP 挡掉时的兜底）。
+         必须 async：不挡入口模块的解析与执行（见 public/title-probe.js 里的注释）。 -->
+    <script src="/title-probe.js" async></script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

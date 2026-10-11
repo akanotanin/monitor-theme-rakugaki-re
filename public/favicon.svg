@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!-- 手绘五角星：红标记笔影子错位在右下，星身黄填墨线描边（缩到 16px 也认得出）。 -->
+  <path d="M17.6 5.8 L21.3 13.8 L29.8 14.8 L22.6 20.5 L24.7 28.9 L17.3 23.9 L10.3 29.4 L12.1 20.2 L6.0 15.4 L14.6 14.2 Z" fill="#ff6b6b"/>
+  <path d="M16.4 4.4 L20.1 12.4 L28.6 13.4 L21.4 19.1 L23.5 27.5 L16.1 22.5 L9.1 28.0 L10.9 18.8 L4.8 14.0 L13.4 12.8 Z" fill="#ffd93d" stroke="#2c2c2c" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

@@ -1,0 +1,691 @@
+/* ─────────────────────────────────────────────────────────────── rakugaki（涂鸦本）
+   手绘涂鸦风的设计系统都在这里：纸与墨的 token、笔记本纸张、以及手绘组件
+   （卡片 / 胶带 / 图钉 / 进度条 / 清单 / 便签）。
+
+   两条纪律：
+   ① 组件类 `.dg-*` 一律是**完整长相**（描边、底色、影子、圆角都写在类里）——
+      不靠调用处的 Tailwind 工具类去改它们的底色/描边。未分层规则在层叠顺序上
+      高于 Tailwind 的分层工具类，调用处写 bg-* / border-* 会被静默压掉
+      （上一枚皮肤踩过这个坑：选中态与危险按钮整批失效）。布局类（flex / p-* /
+      text-*）照旧随便用，它们不跟这些属性打架。
+   ② 圆角只用小半径 + 轻微旋转，不用大圆角、不用实线描边、不用精确阴影 ——
+      这三样是这套风格的「禁止项」（见 FONTS.md 里的视觉参考一节）。
+   ─────────────────────────────────────────────────────────────── */
+
+@import "tailwindcss" source(none);
+@source "../index.html";
+@source "../src";
+
+@custom-variant dark (&:is(.dark *));
+
+/* ------------------------------------------------------------------ 字体
+   拉丁子集随主题包分发（离线可用：不联 Google Fonts、不依赖访客机器装了什么）。
+   中日韩字形不打包——一套完整 CJK 字面要好几 MB，而各家系统自带的楷体／黑体
+   本来就够看，所以字体栈的后半段一律写系统字体：
+   标题・名称走 Shantell Sans（手写感的无衬线），汉字落到系统楷体；
+   正文走 Shantell Sans，汉字落到系统黑体；边注（纸角的一行小字）用 Caveat。 */
+@font-face { font-family: "Shantell Sans"; src: url("/fonts/shantell-sans-latin-400-normal.woff2") format("woff2"); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: "Shantell Sans"; src: url("/fonts/shantell-sans-latin-500-normal.woff2") format("woff2"); font-weight: 500; font-style: normal; font-display: swap; }
+@font-face { font-family: "Shantell Sans"; src: url("/fonts/shantell-sans-latin-700-normal.woff2") format("woff2"); font-weight: 700; font-style: normal; font-display: swap; }
+@font-face { font-family: "Caveat"; src: url("/fonts/caveat-latin-500-normal.woff2") format("woff2"); font-weight: 500; font-style: normal; font-display: swap; }
+
+:root {
+  /* ---- 纸与墨：整套配色的根。奶白纸面、近黑墨线、三支标记笔（红 / 蓝绿 / 黄），
+     外加两支图表用的辅助色（笔蓝 / 笔紫）。 */
+  --paper: #fffef5;
+  --paper-2: #f6f4e6;
+  --card: #fffef5;
+  --ink: #2c2c2c;
+  --ink-2: #4b4842;
+  --ink-3: #807b70;
+  --ink-4: #aba593;
+  /* 虚线描边用 --line；分隔线 / 浅描边用 --line-strong 与 --line-weak。 */
+  --line: rgba(44, 44, 44, .72);
+  --line-strong: rgba(44, 44, 44, .4);
+  --line-weak: rgba(44, 44, 44, .16);
+  --red: #ff6b6b;    --red-ink: #d94f45;    --red-soft: rgba(255, 107, 107, .2);
+  --teal: #4ecdc4;   --teal-ink: #199c90;   --teal-soft: rgba(78, 205, 196, .22);
+  --yellow: #ffd93d; --yellow-ink: #a8840e; --yellow-soft: rgba(255, 217, 61, .42);
+  --olive: #a98d16;
+  --blue: #6a9fe0;   --blue-ink: #3f74b8;   --blue-soft: rgba(106, 159, 224, .22);
+  --purple: #a586d4;
+  /* 笔记本的两条线：横格线（淡蓝）与页边线（淡红）。 */
+  --rule: rgba(151, 189, 224, .4);
+  --margin-ink: rgba(255, 107, 107, .5);
+  /* 胶带：三种颜色、半透明（素材口径 40–50%，底下的纸透出来）。 */
+  --tape-y: rgba(255, 217, 61, .55);
+  --tape-t: rgba(78, 205, 196, .46);
+  --tape-r: rgba(255, 107, 107, .4);
+  /* 状态：在线＝蓝绿墨、离线＝红墨、未接入＝灰。 */
+  --ok: var(--teal-ink);
+  --bad: var(--red-ink);
+  --warn: var(--olive);
+  /* 地图：陆地那层淡染与海岸线的墨色。 */
+  --map-land: rgba(78, 205, 196, .16);
+  --map-stroke: rgba(44, 44, 44, .6);
+  --map-grid: rgba(44, 44, 44, .13);
+  /* 图表六色：笔红 / 蓝绿 / 赭黄 / 笔蓝 / 笔紫 / 笔粉。 */
+  --c1: #d94f45; --c2: #199c8b; --c3: #a9821c; --c4: #3f74b8; --c5: #8a67c4; --c6: #c95d95;
+
+  /* 字体栈（源变量另起名字再映射到 Tailwind 的 --font-* 命名空间，
+     直接写 --font-* 会与 @theme 撞名、变成自己引用自己的死循环）。 */
+  --family-hand: "Shantell Sans", "Kaiti SC", "KaiTi", "STKaiti", "AR PL UKai CN", cursive, sans-serif;
+  --family-text: "Shantell Sans", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Noto Sans SC", system-ui, -apple-system, sans-serif;
+  --family-note: "Caveat", "Kaiti SC", "KaiTi", "STKaiti", "AR PL UKai CN", cursive;
+}
+
+/* ---- 黑板（暗色）：同一本本子里的另一页 —— 墨绿黑板 + 白粉笔。
+   不是把纸面反相：粉笔字的笔画比墨线粗一档、颜色用粉笔白，标记笔换成粉笔荧光。
+   次级文字的亮度比亮色那套调高一档：暗底上的灰更容易发闷（实测视觉复核的建议）。 */
+.dark {
+  --paper: #2c302e;
+  --paper-2: #262a28;
+  --card: #363a38;
+  --ink: #eae6d8;
+  --ink-2: #cfcaba;
+  --ink-3: #ada895;
+  --ink-4: #8a8574;
+  --line: rgba(234, 230, 216, .62);
+  --line-strong: rgba(234, 230, 216, .34);
+  --line-weak: rgba(234, 230, 216, .15);
+  --red: #ff8f8f;    --red-ink: #ff9e94;    --red-soft: rgba(255, 143, 143, .18);
+  --teal: #74ddd4;   --teal-ink: #8ce6dd;   --teal-soft: rgba(116, 221, 212, .2);
+  --yellow: #ffe28a; --yellow-ink: #ffe08a; --yellow-soft: rgba(255, 226, 138, .2);
+  --olive: #d9bc4e;
+  --blue: #9cc0ee;   --blue-ink: #a8c9f5;   --blue-soft: rgba(156, 192, 238, .18);
+  --purple: #c4a9ec;
+  --rule: rgba(255, 255, 255, .055);
+  --margin-ink: rgba(255, 143, 143, .34);
+  --tape-y: rgba(255, 226, 138, .34);
+  --tape-t: rgba(116, 221, 212, .32);
+  --tape-r: rgba(255, 143, 143, .3);
+  --ok: #8ce6dd;
+  --bad: #ff9e94;
+  --warn: #ffe08a;
+  --map-land: rgba(116, 221, 212, .18);
+  --map-stroke: rgba(234, 230, 216, .56);
+  --map-grid: rgba(234, 230, 216, .14);
+  --c1: #ff9e94; --c2: #8ce6dd; --c3: #ffe08a; --c4: #a8c9f5; --c5: #c4a9ec; --c6: #ffb1d4;
+}
+
+@theme inline {
+  --color-paper: var(--paper);
+  --color-paper-2: var(--paper-2);
+  --color-card: var(--card);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-ink-4: var(--ink-4);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-line-weak: var(--line-weak);
+  --color-red: var(--red);
+  --color-red-ink: var(--red-ink);
+  --color-teal: var(--teal);
+  --color-teal-ink: var(--teal-ink);
+  --color-yellow: var(--yellow);
+  --color-yellow-ink: var(--yellow-ink);
+  --color-olive: var(--olive);
+  --color-blue: var(--blue);
+  --color-blue-ink: var(--blue-ink);
+  --color-purple: var(--purple);
+  --color-ok: var(--ok);
+  --color-bad: var(--bad);
+  --color-warn: var(--warn);
+  --font-hand: var(--family-hand);
+  --font-text: var(--family-text);
+  --font-note: var(--family-note);
+}
+
+/* ------------------------------------------------------------------ 基底 */
+@layer base {
+  html {
+    color: var(--ink);
+    font-family: var(--family-text);
+    /* 顶层滚动容器的高度按 svh 算（手机地址栏收起/展开不跳）。 */
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    margin: 0;
+    min-height: 100svh;
+    /* 笔记本纸张：奶白纸面 + 32px 一道的横格线（蓝）。线随内容滚动 —— 这是一张
+       铺在「桌面」上的纸，不是贴在视口上的膜。 */
+    background-color: var(--paper);
+    background-image: repeating-linear-gradient(to bottom, transparent 0 31px, var(--rule) 31px 32px);
+  }
+  /* 选中是高亮笔划过的那一下。 */
+  ::selection { background: var(--yellow-soft); }
+  /* 键盘焦点 = 一圈红虚线（手绘版的 focus ring）。 */
+  :focus-visible { outline: 2px dashed var(--red-ink); outline-offset: 2px; border-radius: 4px; }
+}
+
+/* ------------------------------------------------------------------ 小工具 */
+.dg-hand { font-family: var(--family-hand); }
+.dg-note { font-family: var(--family-note); }
+/* 读数数字：有等宽数字特性就用（没有也不报错）——每两秒刷一次时不左右抖。 */
+.tnum { font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1; }
+
+/* 手绘波浪分隔线：用 mask 铺一条波浪，颜色跟着墨色走（深色下自然变粉笔白）。 */
+.dg-squiggle {
+  height: 7px;
+  background: var(--line-strong);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='7' viewBox='0 0 120 7'%3E%3Cpath d='M0 3.5 C 15 1, 30 6.5, 45 3.5 S 75 6.5, 90 3.5 S 115 6.5, 120 3.5' fill='none' stroke='%23000' stroke-width='1.4' stroke-linecap='round'/%3E%3C/svg%3E") repeat-x 0 0 / 120px 7px;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='7' viewBox='0 0 120 7'%3E%3Cpath d='M0 3.5 C 15 1, 30 6.5, 45 3.5 S 75 6.5, 90 3.5 S 115 6.5, 120 3.5' fill='none' stroke='%23000' stroke-width='1.4' stroke-linecap='round'/%3E%3C/svg%3E") repeat-x 0 0 / 120px 7px;
+}
+
+/* 高亮笔：黄马克笔横着划过去的一道（标题、关键词）。 */
+.dg-hl {
+  background: linear-gradient(100deg, rgba(255, 217, 61, 0) 0.6%, rgba(255, 217, 61, .62) 4%, rgba(255, 217, 61, .5) 96%, rgba(255, 217, 61, 0) 99.4%);
+  padding: 0 .3em;
+  margin: 0 -.1em;
+  border-radius: 3px 5px 3px 5px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+.dark .dg-hl {
+  background: linear-gradient(100deg, rgba(255, 226, 138, 0) 0.6%, rgba(255, 226, 138, .3) 4%, rgba(255, 226, 138, .24) 96%, rgba(255, 226, 138, 0) 99.4%);
+}
+
+/* 波浪下划线：链接与「回列表」这类文字按钮。 */
+.dg-wavy {
+  text-decoration: underline;
+  text-decoration-style: wavy;
+  text-decoration-thickness: 1.4px;
+  text-decoration-color: var(--teal-ink);
+  text-underline-offset: 4px;
+}
+.dg-wavy-red {
+  text-decoration-color: var(--red-ink);
+}
+
+/* 命中区扩张（图标按钮 36 → 44+）：与上一枚皮肤同一套做法——伪元素撑出圈，
+   圈里也算点进按钮。图标带虚线边框时 inset 相对内边距盒算，所以用 -6px。 */
+.tap { position: relative; }
+.tap::before { content: ""; position: absolute; inset: -6px; border-radius: inherit; }
+
+/* 顶栏那条图标带：装不下时横向滑动，滑动条藏起来（露一半的图标就是提示）。 */
+.header-tools { scrollbar-width: none; }
+.header-tools::-webkit-scrollbar { display: none; }
+
+/* ------------------------------------------------------------------ 顶栏 */
+.dg-header {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  background: color-mix(in srgb, var(--paper) 88%, transparent);
+  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
+}
+/* 顶栏下沿：一条手绘波浪线（不是 1px 直线）。 */
+.dg-header-line { height: 7px; }
+
+.dg-name {
+  font-family: var(--family-hand);
+  font-weight: 700;
+  letter-spacing: .01em;
+}
+
+/* 图标按钮：平时没有边框，悬停时「随手描一圈」虚线 + 一点标记笔影子与轻微歪头。 */
+.dg-icon {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  flex: none;
+  color: var(--ink-2);
+  border: 1.5px dashed transparent;
+  border-radius: 11px 13px 10px 12px;
+  transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease,
+    background-color .16s ease, color .16s ease;
+}
+.dg-icon:hover {
+  color: var(--ink);
+  border-color: var(--line);
+  background: var(--card);
+  transform: rotate(-2deg);
+  box-shadow: 2px 2px 0 var(--tape-y);
+}
+.dg-icon:active { transform: rotate(-1deg) translate(1px, 1px); box-shadow: none; }
+.dg-icon[aria-pressed="true"] { border-color: var(--line); background: var(--yellow-soft); color: var(--ink); }
+.dg-icon svg { width: 18px; height: 18px; }
+
+/* ------------------------------------------------------------------ 搜索框 */
+.dg-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border: 1.5px dashed transparent;
+  border-radius: 11px 13px 10px 12px;
+  transition: width .18s ease, border-color .18s ease, background-color .18s ease;
+}
+.dg-search:hover { border-color: var(--line); background: var(--card); }
+.dg-search input {
+  width: 100%;
+  height: 100%;
+  padding: 0 30px 0 34px;
+  font: inherit;
+  font-size: 13.5px;
+  color: transparent;
+  background: transparent;
+  border: none;
+  outline: none;
+}
+.dg-search input::placeholder { color: transparent; }
+.dg-search input::-webkit-search-cancel-button { display: none; }
+.dg-search-ico { position: absolute; left: 10px; width: 16px; height: 16px; color: inherit; pointer-events: none; }
+.dg-search-clear { position: absolute; right: 6px; display: none; }
+@media (min-width: 640px) {
+  .dg-search:focus-within { width: 15rem; border-color: var(--line); background: var(--card); }
+  .dg-search:focus-within input { color: var(--ink); }
+  .dg-search:focus-within input::placeholder { color: var(--ink-4); }
+  .dg-search:focus-within .dg-search-clear { display: grid; }
+}
+@media (max-width: 639px) {
+  .dg-search input { color: transparent; }
+}
+
+/* 窄屏那一行里的输入框：一直在的长相。 */
+.dg-search-row input {
+  width: 100%;
+  height: 38px;
+  padding: 0 34px 0 34px;
+  font: inherit;
+  font-size: 14px;
+  color: var(--ink);
+  background: var(--card);
+  border: 1.5px dashed var(--line);
+  border-radius: 12px 14px 11px 13px;
+  outline: none;
+}
+.dg-search-row input::placeholder { color: var(--ink-4); }
+.dg-search-row .dg-search-clear { display: grid; }
+
+/* ------------------------------------------------------------------ 浮层与按钮 */
+/* 顶栏那枚下拉（卡片形态）与几处浮层的小纸片。 */
+.dg-menu {
+  background: var(--card);
+  border: 1.5px dashed var(--line);
+  border-radius: 11px 13px 10px 13px;
+  box-shadow: 4px 4px 0 var(--tape-t);
+  padding: 3px;
+}
+/* 主按钮（重试这一类）：墨底纸字 + 红笔影子，按下压平。 */
+.dg-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 14px;
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--paper);
+  background: var(--ink);
+  border: 1.5px dashed var(--ink);
+  border-radius: 9px 11px 8px 11px;
+  box-shadow: 3px 3px 0 var(--red);
+  transition: transform .15s ease, box-shadow .15s ease;
+}
+.dg-btn:hover { transform: translate(1px, 1px); box-shadow: 4px 4px 0 var(--teal); }
+.dg-btn:active { transform: translate(2px, 2px); box-shadow: none; }
+.dark .dg-btn { color: var(--paper); }
+
+/* ------------------------------------------------------------------ 便签标签（分组 / 档位 / 时间范围）
+   一枚便签 = 虚线描边的小纸片，逐枚轻微歪头；选中的那枚是黄高亮 + 墨线 + 影子。 */
+.dg-tabs { display: flex; gap: 8px; align-items: center; }
+.dg-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  padding: 4px 11px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--ink-2);
+  background: var(--card);
+  border: 1.5px dashed var(--line-strong);
+  border-radius: 9px 11px 8px 11px;
+  transform: rotate(var(--chip-tilt, 0deg));
+  transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease, color .16s ease, background-color .16s ease;
+}
+.dg-tabs > :nth-child(3n+1) { --chip-tilt: -.7deg; }
+.dg-tabs > :nth-child(3n+2) { --chip-tilt: .6deg; }
+.dg-tabs > :nth-child(3n) { --chip-tilt: -.3deg; }
+.dg-chip:hover { transform: rotate(0deg) translateY(-1px); color: var(--ink); border-color: var(--line); box-shadow: 2px 2px 0 var(--tape-t); }
+.dg-chip:active { transform: rotate(0deg) translate(1px, 1px); box-shadow: none; }
+.dg-chip-on {
+  color: var(--ink);
+  font-weight: 700;
+  background: var(--yellow-soft);
+  border-color: var(--line);
+  box-shadow: 2px 2px 0 var(--teal);
+  transform: rotate(-1deg);
+}
+.dg-chip-on .dg-count { font-weight: 400; }
+
+/* ------------------------------------------------------------------ 卡片（涂鸦卡片）
+   一张卡 = 一块贴在纸上的卡纸：虚线描边、标记笔硬影子（不是模糊阴影）、
+   顶上一条半透明胶带；整块轻微歪头，逐张轮换角度与影子颜色。 */
+.dg-card {
+  position: relative;
+  background: var(--card);
+  border: 2px dashed var(--line);
+  border-radius: 12px 14px 11px 15px;
+  box-shadow: 4px 4px 0 var(--tone, var(--teal));
+  transform: rotate(var(--tilt, 0deg));
+  transition: transform .16s ease, box-shadow .16s ease;
+}
+.dg-card:hover {
+  transform: rotate(var(--tilt, 0deg)) translate(1px, 1px);
+  box-shadow: 6px 6px 0 var(--tone-h, var(--red));
+}
+.dg-card:active {
+  transform: rotate(var(--tilt, 0deg)) translate(2px, 2px) scale(.99);
+  box-shadow: 1px 1px 0 var(--tone, var(--teal));
+}
+/* 胶带：默认贴顶中；每三张换一次位置与角度（右上角、左斜）。 */
+.dg-card::before {
+  content: "";
+  position: absolute;
+  top: -9px;
+  left: 50%;
+  width: 62px;
+  height: 17px;
+  transform: translateX(-50%) rotate(-3deg);
+  background: var(--tape, var(--tape-y));
+  border-radius: 2px;
+  opacity: .9;
+  pointer-events: none;
+}
+.dg-card:nth-child(3n+2)::before { left: auto; right: 18px; transform: rotate(4deg); }
+.dg-card:nth-child(3n)::before { left: 18px; width: 54px; transform: rotate(-5deg); }
+/* 逐张轮换：歪头角度 / 影子色 / 悬停影子色 / 胶带色（八张一循环）。 */
+.dg-cards > :nth-child(8n+1) { --tilt: -.8deg; --tone: var(--teal);  --tone-h: var(--red);    --tape: var(--tape-y); }
+.dg-cards > :nth-child(8n+2) { --tilt: .7deg;  --tone: var(--red);   --tone-h: var(--teal);   --tape: var(--tape-t); }
+.dg-cards > :nth-child(8n+3) { --tilt: -.5deg; --tone: var(--yellow);--tone-h: var(--teal);   --tape: var(--tape-r); }
+.dg-cards > :nth-child(8n+4) { --tilt: .9deg;  --tone: var(--teal);  --tone-h: var(--yellow); --tape: var(--tape-y); }
+.dg-cards > :nth-child(8n+5) { --tilt: -.9deg; --tone: var(--red);   --tone-h: var(--yellow); --tape: var(--tape-t); }
+.dg-cards > :nth-child(8n+6) { --tilt: .5deg;  --tone: var(--yellow);--tone-h: var(--red);    --tape: var(--tape-y); }
+.dg-cards > :nth-child(8n+7) { --tilt: -.4deg; --tone: var(--teal);  --tone-h: var(--red);    --tape: var(--tape-r); }
+.dg-cards > :nth-child(8n)   { --tilt: .8deg;  --tone: var(--red);   --tone-h: var(--teal);   --tape: var(--tape-t); }
+
+/* ------------------------------------------------------------------ 状态印章 */
+.dg-stamp {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  padding: 1.5px 9px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.6;
+  border: 1.6px dashed;
+  border-radius: 9px 12px 8px 12px;
+  transform: rotate(-2deg);
+}
+.dg-stamp svg { width: 12px; height: 12px; }
+.dg-stamp-on { color: var(--teal-ink); border-color: var(--teal-ink); background: var(--teal-soft); }
+.dg-stamp-off { color: var(--red-ink); border-color: var(--red-ink); background: var(--red-soft); }
+.dg-stamp-idle { color: var(--ink-3); border-color: var(--line-strong); background: var(--paper-2); }
+
+/* ------------------------------------------------------------------ 备注小标签 */
+.dg-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 1px 8px;
+  font-size: 11.5px;
+  line-height: 1.7;
+  color: var(--ink-2);
+  background: var(--paper);
+  border: 1.4px dashed var(--line-strong);
+  border-radius: 8px 10px 7px 10px;
+  transform: rotate(var(--tag-tilt, 0deg));
+}
+.dg-tag:nth-child(2n) { --tag-tilt: .8deg; }
+.dg-tag:nth-child(3n) { --tag-tilt: -.7deg; }
+/* 私有那几枚：深一档的描边 + 锁（仅自己可见）。 */
+.dg-tag-own { border-color: var(--line); background: var(--paper-2); color: var(--ink-3); }
+.dg-tag svg { width: 11px; height: 11px; flex: none; }
+
+/* ------------------------------------------------------------------ 进度条（手绘读数格） */
+.dg-track {
+  height: 10px;
+  background: var(--paper-2);
+  border: 1.5px dashed var(--line-strong);
+  border-radius: 7px 9px 6px 9px;
+  overflow: hidden;
+}
+.dg-fill {
+  height: 100%;
+  min-width: 0;
+  border-radius: 6px 8px 5px 8px;
+  background-color: var(--fill, var(--teal));
+  /* 斜细纹 = 马克笔涂过的痕迹（白 28% 的斜纹）。 */
+  background-image: repeating-linear-gradient(135deg, rgba(255, 255, 255, .26) 0 3px, rgba(255, 255, 255, 0) 3px 7px);
+  transition: width .45s ease;
+}
+/* 快满了换成红笔（越满越该看一眼），与上一枚主题同一条口径（85%）。 */
+.dg-fill-hot { --fill: var(--red); }
+
+/* ------------------------------------------------------------------ 清单表格（一棵「待办清单」）
+   整张 = 一页撕下来的清单纸；一行一台，悬停时整行被黄高亮笔划过。 */
+.dg-list {
+  position: relative;
+  background: var(--card);
+  border: 2px dashed var(--line);
+  border-radius: 13px 15px 12px 15px;
+  box-shadow: 5px 5px 0 var(--tone, var(--teal));
+}
+.dg-list::before {
+  content: "";
+  position: absolute;
+  top: -10px;
+  left: 34px;
+  width: 74px;
+  height: 19px;
+  transform: rotate(-4deg);
+  background: var(--tape-y);
+  opacity: .9;
+  border-radius: 2px;
+  pointer-events: none;
+}
+.dg-list::after {
+  content: "";
+  position: absolute;
+  top: -10px;
+  right: 34px;
+  width: 74px;
+  height: 19px;
+  transform: rotate(3deg);
+  background: var(--tape-t);
+  opacity: .9;
+  border-radius: 2px;
+  pointer-events: none;
+}
+.dg-row {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr) 92px 92px 92px 128px 92px;
+  gap: 14px;
+  align-items: center;
+  padding: 9px 16px;
+  border-top: 1.5px dashed var(--line-weak);
+  cursor: pointer;
+  transition: background-color .14s ease;
+  position: relative;
+}
+.dg-row:hover { background: var(--yellow-soft); }
+.dg-row:active { background: var(--yellow-soft); transform: translate(1px, 1px); }
+.dg-row-head {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr) 92px 92px 92px 128px 92px;
+  gap: 14px;
+  align-items: center;
+  padding: 4px 16px 8px;
+  font-size: 11.5px;
+  color: var(--ink-3);
+}
+.dg-check {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border: 1.6px dashed var(--line-strong);
+  border-radius: 6px 8px 5px 8px;
+  transform: rotate(-2deg);
+  color: var(--teal-ink);
+  background: var(--paper);
+}
+.dg-check-off { color: var(--red-ink); }
+.dg-check svg { width: 13px; height: 13px; }
+.dg-only-narrow { display: none; }
+@media (max-width: 767px) {
+  .dg-row { grid-template-columns: 24px minmax(0, 1fr); gap: 10px; padding: 8px 12px; }
+  .dg-row-head { display: none; }
+  .dg-col-wide { display: none; }
+  .dg-only-narrow { display: block; }
+}
+
+/* ------------------------------------------------------------------ 概览便签（小抄）
+   一张钉在列表页顶部的小便签，四个读数并排。 */
+.dg-memo {
+  position: relative;
+  background: var(--card);
+  border: 2px dashed var(--line);
+  border-radius: 13px 16px 12px 16px;
+  box-shadow: 6px 6px 0 var(--teal);
+  transform: rotate(-.35deg);
+}
+.dg-memo::before {
+  content: "";
+  position: absolute;
+  top: -10px;
+  left: 50%;
+  width: 84px;
+  height: 19px;
+  transform: translateX(-50%) rotate(-2deg);
+  background: var(--tape-y);
+  opacity: .9;
+  border-radius: 2px;
+  pointer-events: none;
+}
+.dg-memo-block { min-width: 0; }
+.dg-memo-label { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--ink-3); }
+.dg-memo-label svg { width: 13px; height: 13px; }
+.dg-memo-big { font-family: var(--family-hand); font-weight: 700; font-size: 21px; line-height: 1.25; margin-top: 2px; }
+
+/* ------------------------------------------------------------------ 地图（手绘世界地图 + 图钉）
+   一张用胶带贴在页上的地图纸。 */
+.dg-map {
+  position: relative;
+  background: var(--card);
+  border: 2px dashed var(--line);
+  border-radius: 13px 16px 12px 16px;
+  box-shadow: 6px 6px 0 var(--teal);
+}
+.dg-map::before, .dg-map::after {
+  content: "";
+  position: absolute;
+  top: -10px;
+  width: 78px;
+  height: 19px;
+  border-radius: 2px;
+  opacity: .9;
+  pointer-events: none;
+}
+.dg-map::before { left: 40px; transform: rotate(-5deg); background: var(--tape-y); }
+.dg-map::after { right: 40px; transform: rotate(4deg); background: var(--tape-t); }
+.dg-map-scroll { overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; }
+.dg-map-scroll svg { display: block; }
+.dg-pin { cursor: pointer; }
+.dg-pin circle, .dg-pin path, .dg-pin line { transition: transform .15s ease; }
+.dg-pin:hover > g, .dg-pin:focus-visible > g { transform: scale(1.3); transform-box: fill-box; transform-origin: center; }
+.dg-pin > g { transition: transform .15s ease; }
+.dg-map-hint { font-family: var(--family-note); font-size: 13px; color: var(--ink-3); }
+
+/* ------------------------------------------------------------------ 详情页 */
+.dg-hr { border: none; border-top: 1.5px dashed var(--line-strong); margin: 0; }
+.dg-fact { min-width: 0; border-bottom: 1.4px dashed var(--line-weak); padding-bottom: 6px; }
+.dg-fact dt { font-size: 11.5px; color: var(--ink-3); }
+.dg-fact dd { margin: 2px 0 0; font-size: 13.5px; color: var(--ink); overflow-wrap: anywhere; }
+
+/* ------------------------------------------------------------------ 骨架屏与空态 */
+.dg-skel {
+  background: var(--paper-2);
+  border: 1.5px dashed var(--line-weak);
+  border-radius: 12px 14px 11px 14px;
+  animation: dg-pulse 1.6s ease-in-out infinite;
+}
+@keyframes dg-pulse { 50% { opacity: .5; } }
+
+.dg-empty { font-family: var(--family-hand); font-size: 15px; color: var(--ink-2); }
+
+/* 图表 tooltip 那张小便条。 */
+.dg-tip {
+  background: var(--card);
+  border: 1.5px dashed var(--line);
+  border-radius: 10px 12px 9px 12px;
+  box-shadow: 3px 3px 0 var(--tape-t);
+  padding: 6px 8px;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+/* ------------------------------------------------------------------ 页脚 */
+.dg-credit {
+  font-family: var(--family-note);
+  font-size: 13.5px;
+  color: var(--ink-3);
+}
+.dg-credit a { color: inherit; text-decoration: underline; text-decoration-style: wavy; text-decoration-thickness: 1px; text-decoration-color: var(--line-strong); text-underline-offset: 3px; }
+.dg-credit a:hover { color: var(--ink); text-decoration-color: var(--teal-ink); }
+
+/* ------------------------------------------------------------------ 纸面装饰
+   页边线（红）与装订孔：视口级装饰，跟着内容列定位（列够宽时才出现）。
+   它们都是 aria-hidden 的纯装饰，不参与任何交互。 */
+.dg-margin-line { display: none; }
+.dg-binding { display: none; }
+@media (min-width: 640px) {
+  .dg-margin-line {
+    display: block;
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: max(8px, calc((100vw - 1280px) / 2 + 16px));
+    width: 2px;
+    background: var(--margin-ink);
+    transform: rotate(.15deg);
+    z-index: 1;
+    pointer-events: none;
+  }
+}
+@media (min-width: 1400px) {
+  .dg-binding {
+    display: block;
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: calc((100vw - 1280px) / 2 - 52px);
+    width: 30px;
+    /* 打孔：外圈墨线 + 孔内右下角一点内影（纸被戳过的感觉）。 */
+    background-image:
+      radial-gradient(circle at 16.5px 18px, transparent 0 4.4px, rgba(44, 44, 44, .12) 4.4px 6px, transparent 6.6px),
+      radial-gradient(circle at 15px 16px, var(--paper) 0 5px, var(--line-strong) 5px 6.8px, transparent 7.2px);
+    background-size: 30px 36px;
+    background-repeat: repeat-y;
+    z-index: 1;
+    pointer-events: none;
+  }
+}
+
+/* ------------------------------------------------------------------ 动效纪律
+   系统要求「减弱动态效果」时：歪头、抖动、过渡全停。 */
+@media (prefers-reduced-motion: reduce) {
+  .dg-card, .dg-chip, .dg-icon, .dg-pin > g { transition: none; }
+  .dg-card:hover, .dg-card:active { transform: rotate(var(--tilt, 0deg)); }
+  .dg-fill { transition: none; }
+  .dg-skel { animation: none; }
+}
