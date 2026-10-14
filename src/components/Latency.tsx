@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react"
 
 import { api, type Node } from "@/lib/api"
+import { AUTO_MIN_SPAN_RATIO } from "@/components/DoodleChart"
 import { wobblePoints } from "@/lib/sketch"
 
 /** `/api/nodes/{id}/metrics?series=ping` 返回里，本组件用到的几块（形状同详情页）。 */
@@ -129,15 +130,20 @@ const SPARK_H = 20
 /**
  * 走势线：无坐标轴、无交互，只把这一小时的起伏画出来；断点照断，不连桥。
  * 每个节点用同一个种子抖一遍（同一条线每次渲染都长一样）。
+ * 纵向量程带「最近视距」下限（常数与详情页共用，见 DoodleChart.tsx）：几 ms 的小波
+ * 不再被放大到满高，稳定线路画出来就是安静的；波动超过下限的照旧满高。
  */
 function Sparkline({ values, className, seed }: { values: Array<number | null>; className: string; seed: number }) {
   const nums = values.filter((v): v is number => v !== null)
   if (nums.length < 2) return <span className="min-w-0 flex-1" />
   const min = Math.min(...nums)
   const max = Math.max(...nums)
-  const span = max - min || 1
+  // 「最近视距」下限：与详情页自动量程共用一个常数（见 DoodleChart.tsx）——窄量程不往死里放，
+  // 拉到底限档时以中值为轴居中展开。
+  const span = Math.max(max - min, Math.max(max, 1) * AUTO_MIN_SPAN_RATIO)
+  const lo = (min + max) / 2 - span / 2
   const x = (i: number) => (values.length <= 1 ? 0 : (i * SPARK_W) / (values.length - 1))
-  const y = (v: number) => SPARK_H - 2 - ((v - min) / span) * (SPARK_H - 4)
+  const y = (v: number) => SPARK_H - 2 - ((v - lo) / span) * (SPARK_H - 4)
   const segments: Array<Array<[number, number]>> = []
   let current: Array<[number, number]> = []
   values.forEach((v, i) => {
