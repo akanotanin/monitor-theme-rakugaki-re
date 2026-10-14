@@ -184,6 +184,43 @@ if (hasRows) {
   console.log('（清单行没出来：站点数据或形态异常，跳过）')
 }
 
+// ③ 离线沉底（live）：DOM 顺序 == 现场拉 /api/nodes 现算的期望序（在线优先、组内 sort/id）。
+//    与 tools/verify_offline_last.mjs 同口径，这里跑在真站上（站点没有离线机时退化为「在线按 sort」）。
+await send('Page.navigate', { url: `${BASE}/` })
+let listReady = false
+for (let i = 0; i < 40 && !listReady; i++) { await sleep(500); listReady = !!(await evalJS(`document.querySelectorAll('article[data-card][data-node], .dg-row[data-node]').length > 0`)) }
+const O = JSON.parse(await evalJS(`(async () => {
+  const api = await (await fetch('/api/nodes')).json()
+  const nodes = api.nodes ?? []
+  const expected = [...nodes].sort((a, b) => (a.online === b.online ? 0 : a.online ? -1 : 1) || a.sort - b.sort || a.id - b.id).map((n) => n.id)
+  const dom = [...document.querySelectorAll('article[data-card][data-node], .dg-row[data-node]')].map((c) => +c.getAttribute('data-node'))
+  return JSON.stringify({ expected, dom, offline: nodes.filter((n) => !n.online).length, total: nodes.length })
+})()`) ?? '{}')
+check(`★ 列表顺序 = 在线优先（离线沉底；共 ${O.total} 台 / 离线 ${O.offline} 台）`,
+  listReady && Array.isArray(O.dom) && O.dom.length > 0 && JSON.stringify(O.dom) === JSON.stringify(O.expected),
+  `期望 ${O.expected?.join(',')} / 实测 ${O.dom?.join(',')}`)
+
+// ④ 详情页连接数（live）：hub 上报 `metrics.tcp / udp` 时两格必须在且是数字；没上报则两格隐身。
+const nodeId = await evalJS(`(async () => {
+  const api = await (await fetch('/api/nodes')).json()
+  const n = (api.nodes ?? []).find((x) => x.online && x.metrics) ?? (api.nodes ?? [])[0]
+  return n ? n.id : null
+})()`)
+if (nodeId) {
+  await send('Page.navigate', { url: `${BASE}/node/${nodeId}` })
+  let hasFacts = false
+  for (let i = 0; i < 40 && !hasFacts; i++) { await sleep(500); hasFacts = !!(await evalJS(`document.querySelectorAll('.dg-fact dt').length > 0`)) }
+  const F = JSON.parse(await evalJS(`JSON.stringify(Object.fromEntries([...document.querySelectorAll('.dg-fact dt')].map((d) => [d.textContent.trim(), d.nextElementSibling ? d.nextElementSibling.textContent.trim() : null])))`) ?? '{}')
+  const hubHas = await evalJS(`(async () => { const api = await (await fetch('/api/nodes')).json(); const n = (api.nodes ?? []).find((x) => x.id === ${nodeId}); return !!(n && n.metrics && typeof n.metrics.tcp === 'number') })()`)
+  const tcpOk = hubHas ? /^\d+$/.test(F['TCP 连接'] ?? '') : !('TCP 连接' in F)
+  const udpOk = hubHas ? /^\d+$/.test(F['UDP 连接'] ?? '') : !('UDP 连接' in F)
+  check('★ 详情页「TCP 连接」/「UDP 连接」（hub 有上报则在且是数字；没上报则两格隐身）',
+    hasFacts && tcpOk && udpOk,
+    `节点 ${nodeId}：TCP=${F['TCP 连接']} UDP=${F['UDP 连接']} hub带此字段=${hubHas}`)
+} else {
+  console.log('（没有节点可开详情页，跳过连接数断言）')
+}
+
 const fails = RESULTS.filter((ok) => !ok).length
 console.log(`\n==== live 断言: ${RESULTS.length - fails} PASS / ${fails} FAIL ====`)
 if (fails) process.exitCode = 1
