@@ -30,11 +30,11 @@ const base = (id, name, o) => ({
   total_rx: 44.2 * GB, total_tx: 42.9 * GB, month_rx: 43.1 * GB, month_tx: 42.0 * GB, month_start: '2026-10-01', day_rx: 6.06 * GB, day_tx: 2.5 * GB,
   ...o,
 })
-// A = 站长真机形状（Kirino Frankfurt）；B = 最坏形状（长时长 + 贵价格 + 4 位数天数）；C = 只有在线时长。
+// A = 站长真机形状；B = 最坏形状（长时长 + 贵价格 + 4 位数天数）；C = 只有在线时长。
 const nodes = [
-  base(1, 'Kirino Frankfurt', { uptime: 22 * 86400 + 21 * 3600, price: 299, currency: 'CNY', billing_cycle: 'yearly', expires_in: 303, expires_at: '2027-08-13' }),
-  base(2, 'Worst Case Long', { uptime: 123 * 86400 + 23 * 3600, price: 1299, currency: 'CNY', billing_cycle: 'yearly', expires_in: 1234, expires_at: '2029-12-31' }),
-  base(3, 'Plain Node', { uptime: 5 * 86400 }),
+  base(1, 'Alpha Frankfurt', { uptime: 22 * 86400 + 21 * 3600, price: 299, currency: 'CNY', billing_cycle: 'yearly', expires_in: 303, expires_at: '2027-08-13' }),
+  base(2, 'Bravo Tokyo', { uptime: 123 * 86400 + 23 * 3600, price: 1299, currency: 'CNY', billing_cycle: 'yearly', expires_in: 1234, expires_at: '2029-12-31' }),
+  base(3, 'Charlie', { uptime: 5 * 86400 }),
 ]
 
 const server = createServer((req, res) => {
