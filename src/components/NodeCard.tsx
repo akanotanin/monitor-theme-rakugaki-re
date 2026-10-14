@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { Fragment, useState } from "react"
 import { Lock } from "lucide-react"
 
 import { LatencyPanel } from "@/components/Latency"
@@ -166,11 +166,11 @@ export function NodeCard({ node, onOpen, onWarm, latencyLines, remarkPlacement }
   // 纸角那一行小字的几截：在线时长 · 价格/周期 · 到期（有哪截写哪截）。
   const price = priceText(node)
   const cycle = cycleText(node)
-  const note = [
+  const noteParts = [
     onlineText(node),
     price ? `${price}${cycle ? ` / ${cycle}` : ""}` : null,
     expiryText(node),
-  ].filter(Boolean).join(" · ")
+  ].filter(Boolean) as string[]
 
   return (
     <article
@@ -251,7 +251,20 @@ export function NodeCard({ node, onOpen, onWarm, latencyLines, remarkPlacement }
           {/* 三网延迟：每条线路一行，数据来自 hub 的 ping 历史（见 Latency.tsx）。 */}
           <LatencyPanel node={node} lines={latencyLines} />
 
-          {note && <div className="dg-note mt-2 truncate text-[13px] leading-snug text-ink-3">{note}</div>}
+          {noteParts.length > 0 && (
+            /* 纸角小字：一截一枚 span（**段内不折行**），「 · 」跟在段尾；段之间那个空格是
+               唯一的断点 —— 超宽时整段换行，绝不把「剩余 303 天」折半、更不截断（2026-10-14
+               站长实拍 1440 桌面 4 列卡上被截的「剩余 30…」）。窄卡另有一档 11px 降档
+               （见 index.css 的 .dg-note 容器查询），桌面单行即够。 */
+            <div className="dg-note mt-2 text-[13px] leading-snug text-ink-3">
+              {noteParts.map((part, i) => (
+                <Fragment key={i}>
+                  {i > 0 && " "}
+                  <span className="whitespace-nowrap">{i < noteParts.length - 1 ? `${part} ·` : part}</span>
+                </Fragment>
+              ))}
+            </div>
+          )}
         </>
       ) : (
         /* Never connected: nothing to plot, so the card stays short rather than
