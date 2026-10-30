@@ -132,10 +132,12 @@ const SPARK_H = 20
  * 每个节点用同一个种子抖一遍（同一条线每次渲染都长一样）。
  * 纵向量程带「最近视距」下限（常数与详情页共用，见 DoodleChart.tsx）：几 ms 的小波
  * 不再被放大到满高，稳定线路画出来就是安静的；波动超过下限的照旧满高。
+ * ★w-full：svg 是替换元素，做 grid 项时默认的 stretch 不会把它撑满轨道（会停在
+ * viewBox 比例推出来的固有宽）——显式 width:100% 拿足整条轨道。
  */
 function Sparkline({ values, className, seed }: { values: Array<number | null>; className: string; seed: number }) {
   const nums = values.filter((v): v is number => v !== null)
-  if (nums.length < 2) return <span className="min-w-0 flex-1" />
+  if (nums.length < 2) return <span className="w-full min-w-0 flex-1" />
   const min = Math.min(...nums)
   const max = Math.max(...nums)
   // 「最近视距」下限：与详情页自动量程共用一个常数（见 DoodleChart.tsx）——窄量程不往死里放，
@@ -158,7 +160,7 @@ function Sparkline({ values, className, seed }: { values: Array<number | null>; 
     <svg
       viewBox={`0 0 ${SPARK_W} ${SPARK_H}`}
       preserveAspectRatio="none"
-      className={`h-4 min-w-0 flex-1 ${className}`}
+      className={`h-4 w-full min-w-0 flex-1 ${className}`}
       aria-hidden="true"
     >
       {segments.map((seg, i) => (
@@ -184,6 +186,12 @@ function Sparkline({ values, className, seed }: { values: Array<number | null>; 
  * （按 ping 任务名匹配，一行一个，最多三条）；留空时按后台顺序自动取前三条。
  * 数据每 60 秒刷新一次（页面在后台时不取）。
  *
+ * ★列宽与 rakugaki 同一口径（2026-10-30 同步）：名字 / 数值两列按内容自适应 —— 名字列 = 整块
+ * 最宽者（上限 80px，超了截断 + title 悬停看全）、数值列 = 整块最宽者（右对齐），丢包列仍固定
+ * 40px（`2.5rem`）。行是 subgrid：列宽在本容器（`[data-latency]`）内**整块共享**，短名字贴身、
+ * 三行仍逐列对齐。旧口径是固定列（名字 64 + 数值 56 右对齐），短名字行在「名字 → 数值」之间
+ * 留一大块死区。
+ *
  * `data-latency` 是给护栏认这一块摊没摊的锚点（按类名找会在改版后失配）。
  */
 export function LatencyPanel({ node, lines }: { node: Node; lines: string }) {
@@ -191,19 +199,22 @@ export function LatencyPanel({ node, lines }: { node: Node; lines: string }) {
   const rows = useMemo(() => pickRows(probes, lines), [probes, lines])
   if (rows.length === 0) return null
   return (
-    <div data-latency="" className="mt-3 space-y-1 border-t-[1.5px] border-dashed border-line-strong pt-2.5">
+    <div
+      data-latency=""
+      className="mt-3 grid grid-cols-[max-content_max-content_minmax(0,1fr)_2.5rem] items-center gap-x-2 gap-y-1 border-t-[1.5px] border-dashed border-line-strong pt-2.5"
+    >
       {rows.map((p) => {
         const last = [...p.points].reverse().find((pt) => pt.latency !== null)
         const ms = last?.latency ?? null
         const gray = toneClass(toneOf(ms, p.loss))
         return (
-          <div key={p.id} className="flex items-center gap-2 text-[11.5px]">
-            <span className="w-16 shrink-0 truncate text-ink-3">{p.name}</span>
-            <span className={`tnum w-14 shrink-0 text-right font-semibold ${gray}`}>
+          <div key={p.id} className="col-span-4 grid grid-cols-subgrid items-center gap-x-2 text-[11.5px]">
+            <span data-probe-name="" className="max-w-20 truncate text-ink-3" title={p.name}>{p.name}</span>
+            <span className={`tnum text-right font-semibold ${gray}`}>
               {ms === null ? "超时" : `${ms} ms`}
             </span>
             <Sparkline values={p.points.map((pt) => pt.latency)} className={gray} seed={node.id + p.id * 7} />
-            <span className="tnum w-10 shrink-0 text-right text-ink-4">
+            <span className="tnum text-right text-ink-4">
               {p.loss > 0 ? `${p.loss.toFixed(1)}%` : "0.0%"}
             </span>
           </div>

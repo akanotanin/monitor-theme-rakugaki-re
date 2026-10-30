@@ -11,10 +11,9 @@
 //   Vendor-B
 //   ...
 //
-// 形态清单取自仓库 theme.json 里 cardStyle 那一项的 options（自动跟着主题走，不用手改）。
-// 视口宽度固定 1440、DPR 2；高度**按内容自适应**（量最后一张卡片/表格行的底边 + 40px 再收视口）。
-// 拍摄口径：涂鸦卡片那张露着地图拍（config.mapOn=true）；清单保持纯列表、不展开行。
-// 输出：doodle → preview.png、checklist → preview-checklist.png、其余 preview-<形态>.png。
+// ★2026-10-30：卡片形态与节点地图都已从主题里拿掉，预览图只剩一张（preview.png）——
+//   也没有「切到清单/打开地图再拍」这回事了，拍的就是访客打开页面看到的样子。
+// 视口宽度固定 1440、DPR 2；高度**按内容自适应**（量最后一张卡片的底边 + 40px 再收视口）。
 import { spawn } from 'node:child_process'
 import { mkdirSync, existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:http'
@@ -30,7 +29,6 @@ const UP = arg('up')
 const PREFIX_FILE = arg('prefixes')
 const SIBLING = arg('sibling', '')
 const OUT_DIR = resolve(arg('out-dir', join(REPO, 'shots')))
-const ONLY = arg('only', '')
 if (!UP || !PREFIX_FILE) {
   console.error('必填：--up <上游站> --prefixes <前缀清单文件>'); process.exit(2)
 }
@@ -46,11 +44,6 @@ const strip = (s) => {
   return out || String(s)
 }
 
-// 形态清单：直接读仓库 theme.json 的 cardStyle options
-const manifest = JSON.parse(readFileSync(join(REPO, 'theme.json'), 'utf8'))
-const field = (manifest.config || []).find((f) => f.key === 'cardStyle')
-const STYLES = (field?.options || []).map((o) => o.value).filter((v) => !ONLY || v === ONLY)
-const OUT_NAME = { doodle: 'preview.png', checklist: 'preview-checklist.png' }
 const PORT = Number(process.env.PREVIEW_PORT || 5401)
 const CDP_PORT = Number(process.env.PREVIEW_CDP_PORT || 9510)
 const CHROME = [
@@ -97,7 +90,7 @@ const proxy = createServer(async (req, res) => {
   res.end(readFileSync(full))
 })
 await new Promise((r) => proxy.listen(PORT, '127.0.0.1', r))
-console.log(`伺服 http://127.0.0.1:${PORT}/  → 上游 ${UP}（形态：${STYLES.join('/')}）`)
+console.log(`伺服 http://127.0.0.1:${PORT}/  → 上游 ${UP}`)
 
 const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`,
   ...(process.env.PROXY ? [`--proxy-server=${process.env.PROXY}`] : []),
@@ -132,32 +125,28 @@ await send('Page.enable'); await send('Runtime.enable')
 const SETTLED = `(() => {
   if (!document.fonts || document.fonts.status !== 'loaded') return false;
   if (!/CPU/.test(document.body.innerText)) return false;
-  const row = document.querySelector('.dg-row');
   const fills = [...document.querySelectorAll('.dg-fill')];
-  return !!(row || fills.some((f) => f.getBoundingClientRect().width >= 2));
+  return fills.some((f) => f.getBoundingClientRect().width >= 2);
 })()`
 
-for (const style of STYLES) {
-  // 拍摄口径：涂鸦卡片露着地图拍；清单保持纯列表（不展开行）。
-  const SHOT_CONFIG = style === 'doodle' ? { cardStyle: style, mapOn: true } : { cardStyle: style }
+{
+  const SHOT_CONFIG = {}
   await fetch(`http://127.0.0.1:${PORT}/__config?c=${encodeURIComponent(JSON.stringify(SHOT_CONFIG))}`)
   await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1400, deviceScaleFactor: 2, mobile: false })
-  await send('Page.navigate', { url: `http://127.0.0.1:${PORT}/?m=${style}` })
+  await send('Page.navigate', { url: `http://127.0.0.1:${PORT}/` })
   const ok = await waitFor(SETTLED)
   await sleep(4500) // 走势线要两个采样才连线；延迟历史也要一趟往返
   const geo = JSON.parse(await js(`(() => {
-    const b = [...document.querySelectorAll('[data-card]')].map((c) => Math.round(c.getBoundingClientRect().bottom))
-      .concat([...document.querySelectorAll('.dg-row')].map((r) => Math.round(r.getBoundingClientRect().bottom)));
-    return JSON.stringify({ card: document.querySelectorAll('[data-card]').length, row: document.querySelectorAll('.dg-row').length, last: b.length ? Math.max(...b) : null })
+    const b = [...document.querySelectorAll('[data-card]')].map((c) => Math.round(c.getBoundingClientRect().bottom));
+    return JSON.stringify({ card: document.querySelectorAll('[data-card]').length, last: b.length ? Math.max(...b) : null })
   })()`))
   const h = geo.last !== null ? Math.round(geo.last + 40) : 900
   await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: h, deviceScaleFactor: 2, mobile: false })
   await sleep(500)
   const shot = await send('Page.captureScreenshot', { format: 'png' })
-  const name = OUT_NAME[style] || `preview-${style}.png`
-  const out = join(OUT_DIR, name)
+  const out = join(OUT_DIR, 'preview.png')
   writeFileSync(out, Buffer.from(shot.result.data, 'base64'))
-  console.log(`${name.padEnd(22)} ${ok ? 'ok ' : '⚠落定超时'} 卡片 ${geo.card} / 行 ${geo.row}  内容底边 ${geo.last} → 1440×${h}  ${Math.round(statSync(out).size / 1024)}KB`)
+  console.log(`${'preview.png'.padEnd(22)} ${ok ? 'ok ' : '⚠落定超时'} 卡片 ${geo.card}  内容底边 ${geo.last} → 1440×${h}  ${Math.round(statSync(out).size / 1024)}KB`)
 }
 console.log('页面异常', errs.length, errs.slice(0, 3).join(' | '))
 console.log('★拍完必须逐字读一遍图内全部文字，确认没有机名前缀 / IP / 域名（视觉模型读图）')

@@ -44,7 +44,7 @@ const server = createServer((req, res) => {
   if (path.startsWith('/api/')) {
     if (path === '/api/me') return json({ authed: false, github: false, public_page: true, site: `http://127.0.0.1:${PORT}`, site_name: '小字', history_days: 30 })
     if (path === '/api/nodes') return json({ nodes })
-    if (path.endsWith('/config')) return json({ cardStyle: 'doodle' })
+    if (path.endsWith('/config')) return json({})
     if (/\/metrics/.test(path)) return json({ metrics: [], ping: [], probes: {}, loss: {} })
     return json({})
   }

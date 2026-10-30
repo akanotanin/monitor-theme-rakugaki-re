@@ -392,7 +392,7 @@
   left: 50%;
   width: 62px;
   height: 17px;
-  transform: translateX(-50%) rotate(-3deg);
+  transform: translateX(-50%) rotate(var(--tape-rot, -3deg));
   background: var(--tape, var(--tape-y));
   border-radius: 2px;
   opacity: .9;
@@ -409,6 +409,72 @@
 .dg-cards > :nth-child(8n+6) { --tilt: .5deg;  --tone: var(--yellow);--tone-h: var(--red);    --tape: var(--tape-y); }
 .dg-cards > :nth-child(8n+7) { --tilt: -.4deg; --tone: var(--teal);  --tone-h: var(--red);    --tape: var(--tape-r); }
 .dg-cards > :nth-child(8n)   { --tilt: .8deg;  --tone: var(--red);   --tone-h: var(--teal);   --tape: var(--tape-t); }
+
+/* 详情页的图表卡：六张资源图与整宽延迟图各包一层「贴在纸上的卡」——与列表卡同一副笔触
+   （2px 虚线框 + 歪圆角 + 标记笔硬影子 + 顶边胶带 + 逐张轮换的歪头）。圆角按奇偶交错
+   （12/14/11/15 ↔ 14/11/15/12）。
+   ★2026-10-30 站长要「内外设计风格一致」后改的口径：影子色、胶带、歪头**全按列表卡那套轮换**
+     （青/红/黄三色影子、黄/青/红三种胶带、±0.4~0.9°），不再统一青绿、也不再只有延迟卡贴胶带。
+   ★影子是 `box-shadow` 不是 border：4px 偏移不吃布局，卡片宽度与裸图时逐像素相同。 */
+.dg-panel {
+  position: relative;
+  background: var(--card);
+  border: 2px dashed var(--line);
+  border-radius: 12px 14px 11px 15px;
+  box-shadow: 4px 4px 0 var(--panel-tone, var(--teal));
+  /* 歪头：与列表卡同一套角度（±0.4~0.9°），逐张轮换 —— 详情页也是「一张张贴上去的纸片」。
+     卡片不悬停、不点开，所以没有 .dg-card 那套 hover/active 的抬升。 */
+  transform: rotate(var(--tilt, 0deg));
+}
+.dg-panel:nth-child(2n) { border-radius: 14px 11px 15px 12px; }
+
+/* 影子色 / 胶带色 / 歪头：取列表卡 8n 那套轮换的前六张（青→红→黄→青→红→黄；胶带黄→青→红→…）。
+   两列摆放时一行正好一青一红，第三行黄红收尾，一屏看下来与首页同一节奏。 */
+.dg-panel:nth-child(6n+1) { --tilt: -.8deg; --panel-tone: var(--teal);   --tape: var(--tape-y); --tape-rot: -3deg; }
+.dg-panel:nth-child(6n+2) { --tilt: .7deg;  --panel-tone: var(--red);    --tape: var(--tape-t); --tape-rot: 2.5deg; }
+.dg-panel:nth-child(6n+3) { --tilt: -.5deg; --panel-tone: var(--yellow); --tape: var(--tape-r); --tape-rot: -2deg; }
+.dg-panel:nth-child(6n+4) { --tilt: .9deg;  --panel-tone: var(--teal);   --tape: var(--tape-y); --tape-rot: 3deg; }
+.dg-panel:nth-child(6n+5) { --tilt: -.9deg; --panel-tone: var(--red);    --tape: var(--tape-t); --tape-rot: -2.5deg; }
+.dg-panel:nth-child(6n)   { --tilt: .5deg;  --panel-tone: var(--yellow); --tape: var(--tape-y); --tape-rot: 2deg; }
+
+/* 详情页的节点识别色：与列表卡「逐张轮换影子色」同一套（teal / red / yellow，按卡片在列表里
+   的位置取模，见 App.tsx 传进来的 accent）。★2026-10-30 起这份颜色**只管名字下那道荧光笔痕**
+   ——图表卡的影子改成按卡位轮换了（见上面 6n 那组），这里留着是为了「点进来还是同一个颜色」的线索。 */
+[data-detail][data-accent="teal"] { --accent-ink: var(--teal); }
+[data-detail][data-accent="red"] { --accent-ink: var(--red); }
+[data-detail][data-accent="yellow"] { --accent-ink: var(--yellow); }
+[data-detail][data-accent] h2 { position: relative; }
+[data-detail][data-accent] h2::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -5px;
+  height: 3px;
+  border-radius: 2px 3px 2px 3px;
+  background: var(--accent-ink);
+  opacity: .5;
+}
+
+/* 胶带：与列表卡同款（同尺寸口径、同一套颜色），每张图卡顶边中间贴一条。
+   角度按 6n 轮换 —— 六张卡同一个角度会一眼看出「复制粘贴」。
+   ★尺寸比列表卡（62×17）略大：详情页的卡宽约两倍，62px 的胶带在 600px 的卡上像颗痣。 */
+.dg-panel::before {
+  content: "";
+  position: absolute;
+  top: -9px;
+  left: 50%;
+  width: 72px;
+  height: 18px;
+  transform: translateX(-50%) rotate(var(--tape-rot, -3deg));
+  background: var(--tape, var(--tape-y));
+  border-radius: 2px;
+  opacity: .9;
+  pointer-events: none;
+}
+
+/* 规格区的三个分组标题与用量细条：2026-10-30 试过一版（身份/用量/时长与续费 + 四格细条），
+   站长看过要求撤回 —— 只留 CSS 里这段说明，样式与 JSX 都回到九格平铺的原口径。 */
 
 /* 卡片底部的「速率・总量」那一行要跟着卡片的宽窄走：12px 下最坏内容
    （`↓ 999 KB/s ↑ 999 KB/s` ＋ `↓ 1.23 TB ↑ 1.23 TB`，两个数都取到各自格式的上限）
@@ -495,65 +561,8 @@
 /* 快满了换成红笔（越满越该看一眼），与上一枚主题同一条口径（85%）。 */
 .dg-fill-hot { --fill: var(--red); }
 
-/* ------------------------------------------------------------------ 清单表格（一棵「待办清单」）
-   整张 = 一页撕下来的清单纸；一行一台，悬停时整行被黄高亮笔划过。 */
-.dg-list {
-  position: relative;
-  background: var(--card);
-  border: 2px dashed var(--line);
-  border-radius: 13px 15px 12px 15px;
-  box-shadow: 5px 5px 0 var(--tone, var(--teal));
-}
-.dg-list::before {
-  content: "";
-  position: absolute;
-  top: -10px;
-  left: 34px;
-  width: 74px;
-  height: 19px;
-  transform: rotate(-4deg);
-  background: var(--tape-y);
-  opacity: .9;
-  border-radius: 2px;
-  pointer-events: none;
-}
-.dg-list::after {
-  content: "";
-  position: absolute;
-  top: -10px;
-  right: 34px;
-  width: 74px;
-  height: 19px;
-  transform: rotate(3deg);
-  background: var(--tape-t);
-  opacity: .9;
-  border-radius: 2px;
-  pointer-events: none;
-}
-/* 网速那列给 max-content 兜底：MB/s 级读数（「↓ 3.0 MB/s ↑ 3.0 MB/s」）比 128px 宽一线，
-   固定宽会把尾字截掉（`.dg-row-head` 与它同一套网格，必须一起改）。 */
-.dg-row {
-  display: grid;
-  grid-template-columns: 26px minmax(0, 1fr) 92px 92px 92px minmax(128px, max-content) 92px;
-  gap: 14px;
-  align-items: center;
-  padding: 9px 16px;
-  border-top: 1.5px dashed var(--line-weak);
-  cursor: pointer;
-  transition: background-color .14s ease;
-  position: relative;
-}
-.dg-row:hover { background: var(--yellow-soft); }
-.dg-row:active { background: var(--yellow-soft); transform: translate(1px, 1px); }
-.dg-row-head {
-  display: grid;
-  grid-template-columns: 26px minmax(0, 1fr) 92px 92px 92px minmax(128px, max-content) 92px;
-  gap: 14px;
-  align-items: center;
-  padding: 4px 16px 8px;
-  font-size: 11.5px;
-  color: var(--ink-3);
-}
+/* 清单表格形态已下线（2026-10-30）：.dg-list / .dg-row / .dg-fold / .dg-name-link 那几套样式
+   连同组件一起删了。只留下面这枚勾选标记 —— 详情页的「已部署」角标还在用它。 */
 .dg-check {
   display: grid;
   place-items: center;
@@ -567,34 +576,6 @@
 }
 .dg-check-off { color: var(--red-ink); }
 .dg-check svg { width: 13px; height: 13px; }
-.dg-only-narrow { display: none; }
-@media (max-width: 767px) {
-  .dg-row { grid-template-columns: 24px minmax(0, 1fr); gap: 10px; padding: 8px 12px; }
-  .dg-row-head { display: none; }
-  .dg-col-wide { display: none; }
-  .dg-only-narrow { display: block; }
-}
-
-/* 点开的清单行：黄色高亮笔停着不走（悬停划过的那一道这里让它也表示「选中」）。 */
-.dg-row[aria-expanded="true"] { background: var(--yellow-soft); }
-
-/* 清单里「名字」这格是进详情的链接：平时与周边一样（清单要干净），悬停才画一条波浪线。 */
-.dg-name-link { text-decoration: none; }
-.dg-name-link:hover {
-  text-decoration: underline;
-  text-decoration-style: wavy;
-  text-decoration-thickness: 1.4px;
-  text-decoration-color: var(--teal-ink);
-  text-underline-offset: 4px;
-}
-
-/* 清单行的「展开的下拉」：点一行在它下面翻出来的那一块 —— 时间范围 + 延迟走势图 +
-   丢包图例（见 LatencyFold，与详情页共用零件与懒加载 chunk），数据点开才取。
-   左右内边距与行对齐（桌面 16px、窄屏 12px）。 */
-.dg-fold { padding: 0 16px 12px; }
-@media (max-width: 767px) {
-  .dg-fold { padding: 0 12px 10px; }
-}
 
 /* ------------------------------------------------------------------ 概览便签（小抄）
    一张钉在列表页顶部的小便签，四个读数并排。 */
@@ -623,35 +604,6 @@
 .dg-memo-label { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--ink-3); }
 .dg-memo-label svg { width: 13px; height: 13px; }
 .dg-memo-big { font-family: var(--family-hand); font-weight: 700; font-size: 21px; line-height: 1.25; margin-top: 2px; }
-
-/* ------------------------------------------------------------------ 地图（手绘世界地图 + 图钉）
-   一张用胶带贴在页上的地图纸。 */
-.dg-map {
-  position: relative;
-  background: var(--card);
-  border: 2px dashed var(--line);
-  border-radius: 13px 16px 12px 16px;
-  box-shadow: 6px 6px 0 var(--teal);
-}
-.dg-map::before, .dg-map::after {
-  content: "";
-  position: absolute;
-  top: -10px;
-  width: 78px;
-  height: 19px;
-  border-radius: 2px;
-  opacity: .9;
-  pointer-events: none;
-}
-.dg-map::before { left: 40px; transform: rotate(-5deg); background: var(--tape-y); }
-.dg-map::after { right: 40px; transform: rotate(4deg); background: var(--tape-t); }
-.dg-map-scroll { overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; }
-.dg-map-scroll svg { display: block; }
-.dg-pin { cursor: pointer; }
-.dg-pin circle, .dg-pin path, .dg-pin line { transition: transform .15s ease; }
-.dg-pin:hover > g, .dg-pin:focus-visible > g { transform: scale(1.3); transform-box: fill-box; transform-origin: center; }
-.dg-pin > g { transition: transform .15s ease; }
-.dg-map-hint { font-family: var(--family-note); font-size: 13px; color: var(--ink-3); }
 
 /* ------------------------------------------------------------------ 详情页 */
 .dg-hr { border: none; border-top: 1.5px dashed var(--line-strong); margin: 0; }
@@ -731,7 +683,7 @@
 /* ------------------------------------------------------------------ 动效纪律
    系统要求「减弱动态效果」时：歪头、抖动、过渡全停。 */
 @media (prefers-reduced-motion: reduce) {
-  .dg-card, .dg-chip, .dg-icon, .dg-pin > g { transition: none; }
+  .dg-card, .dg-chip, .dg-icon { transition: none; }
   .dg-card:hover, .dg-card:active { transform: rotate(var(--tilt, 0deg)); }
   .dg-fill { transition: none; }
   .dg-skel { animation: none; }

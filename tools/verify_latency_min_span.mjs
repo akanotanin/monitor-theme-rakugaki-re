@@ -91,7 +91,7 @@ const server = createServer((req, res) => {
     let body = {}
     if (path === '/api/me') body = { authed: false, github: false, public_page: true, site: `http://127.0.0.1:${PORT}`, site_name: '最小量程校验' }
     else if (path === '/api/nodes') body = NODES
-    else if (path.endsWith('/config')) body = { cardStyle: 'doodle', pingLines: '' }
+    else if (path.endsWith('/config')) body = { pingLines: '' }
     else if (path === '/api/version') body = { version: '1.3.0' }
     else if (/^\/api\/nodes\/\d+\/metrics/.test(path)) {
       const id = Number(path.match(/^\/api\/nodes\/(\d+)\/metrics/)[1])

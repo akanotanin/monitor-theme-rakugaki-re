@@ -1,9 +1,10 @@
-// 详情页「连接数」两格（TCP 连接 / UDP 连接）的护栏（2026-10-14 与 jikasei / rakugaki
-// 同日同口径同步到本仓库：站长要求详情页显示 hub 实时上报的 `metrics.tcp / udp`）。
+// 详情页「连接数」那一格的护栏（2026-10-14 与 jikasei / rakugaki 同日同口径同步到本仓库：
+// 站长要求详情页显示 hub 实时上报的 `metrics.tcp / udp`；2026-10-30 与 rakugaki 同步合成**一格**）。
 //
 // 判据：
-//   ① 在线机器：`dt` 里有「TCP 连接」「UDP 连接」，`dd` 等于夹具上报的 16 / 3；
-//   ② 离线机器：`metrics` 是 null，两格随 `Fact` 的既有口径一起隐身（标签都不出现，
+//   ① 在线机器：`dt` 里有「TCP / UDP 连接」这一格，`dd` 等于夹具上报的「16 / 3」；
+//      旧的「TCP 连接」「UDP 连接」两格不许再出现（合成一格了）；
+//   ② 离线机器：`metrics` 是 null，这一格随 `Fact` 的既有口径一起隐身（标签都不出现，
 //      不许用「—」占格子）。
 // 锚点：规格表 = `dl > div.dg-fact > dt + dd`。
 // 用法：cd <repo> && node tools/verify_detail_conn.mjs
@@ -41,7 +42,7 @@ const server = createServer((req, res) => {
   if (path.startsWith('/api/')) {
     if (path === '/api/me') return json({ authed: false, github: false, public_page: true, site: `http://127.0.0.1:${PORT}`, site_name: '连接数', history_days: 30 })
     if (path === '/api/nodes') return json({ nodes })
-    if (path.endsWith('/config')) return json({ cardStyle: 'doodle' })
+    if (path.endsWith('/config')) return json({})
     if (/\/metrics/.test(path)) return json({ metrics: [], ping: [], probes: {}, loss: {} })
     return json({})
   }
@@ -93,10 +94,11 @@ await sleep(500)
 const f1 = JSON.parse(await js(FACTS) ?? '{}')
 console.log(`    ① 在线机 ${Object.keys(f1).length} 项：${Object.entries(f1).map(([k, v]) => `${k}=${v}`).join(' | ')}`)
 check('在线机器：详情页渲染出来了', ok1 && Object.keys(f1).length > 0)
-check('★ 「TCP 连接」= 夹具上报值（16）', f1['TCP 连接'] === '16', `实测 ${f1['TCP 连接']}`)
-check('★ 「UDP 连接」= 夹具上报值（3）', f1['UDP 连接'] === '3', `实测 ${f1['UDP 连接']}`)
+check('★ 「TCP / UDP 连接」= 夹具上报值（16 / 3）', f1['TCP / UDP 连接'] === '16 / 3', `实测 ${f1['TCP / UDP 连接']}`)
+check('★ 旧的两格不再出现（已合成一格）', !('TCP 连接' in f1) && !('UDP 连接' in f1),
+  `实测 ${JSON.stringify(Object.keys(f1))}`)
 
-// ② 离线机器：metrics 是 null —— 两格随 Fact 口径一起隐身（标签都不出现）。
+// ② 离线机器：metrics 是 null —— 这一格随 Fact 口径一起隐身（标签都不出现）。
 await send('Page.navigate', { url: `http://127.0.0.1:${PORT}/node/2` })
 const ok2 = await waitFor(`document.querySelectorAll('.dg-fact dt').length > 0`, 20000)
 await sleep(500)

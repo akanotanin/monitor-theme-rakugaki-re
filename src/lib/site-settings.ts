@@ -11,11 +11,6 @@
 
 export type ThemeConfig = {
   /**
-   * 卡片形态：doodle = 一台一张手绘卡片（默认）；checklist = 一行一台的待办清单（密度最高）。
-   * 访客可以在顶栏自己换（只记在他自己的浏览器里）。
-   */
-  cardStyle: "doodle" | "checklist"
-  /**
    * 列表页顶部显示什么：none = 都不显示；groups = 分组标签行；summary = 概览便签；
    * both = 两个都显示（默认）。
    */
@@ -24,12 +19,6 @@ export type ThemeConfig = {
   pingLines: string
   /** 「备注显示位置」：备注小标签摊在哪儿（卡片 / 整页详情 / 两边都摊 / 都不显示）。 */
   remarkPlacement: RemarkPlacement
-  /**
-   * 节点地图显不显示：这是**站长给的默认**，也是这一整块功能的**闸门**。
-   * 关掉时地图不渲染、**顶栏那枚开关也不出现**（访客的旧偏好不许把它顶回来）；
-   * 开着时访客可以在顶栏那枚图标上自己关/开，记在他自己浏览器里。
-   */
-  mapOn: boolean
   /** 站点用哪一档明暗：随系统 / 随北京时间自动 / 固定亮（纸面）/ 固定暗（黑板）。 */
   themeMode: ThemeMode
 }
@@ -53,11 +42,8 @@ export const REMARK_PLACEMENTS: RemarkPlacement[] = ["both", "card", "detail", "
  */
 export const LIST_TOPS: ThemeConfig["listTop"][] = ["none", "groups", "summary", "both"]
 
-/** 卡片形态两档，**按界面上要显示的顺序**（顶栏那枚菜单、后台那格下拉都照它排）。 */
-export const CARD_STYLES: ThemeConfig["cardStyle"][] = ["doodle", "checklist"]
-
 /**
- * 卡片那一侧（涂鸦卡片标题行、清单的展开区的备注）要不要摊备注。
+ * 卡片那一侧（涂鸦卡片标题行、备注小标签）要不要摊备注。
  * 与 `remarksOnDetail` 是一对，两处合起来恰好覆盖「备注的落点」那四档口径。
  *
  * ★写成**白名单**（只认 `both`/`card`）而不是「不等于 detail」：后者在新增第四档
@@ -73,18 +59,12 @@ export function remarksOnDetail(p: RemarkPlacement): boolean {
 }
 
 export const DEFAULTS: ThemeConfig = {
-  // 默认「涂鸦卡片」：一台一张手绘卡片，四种读数 + 速率都在卡面上。
-  // 机器多、想一屏看全的访客可以自己切「清单表格」。
-  cardStyle: "doodle",
   // 默认「两个都显示」：分组标签行 + 概览便签。
   listTop: "both",
   // 延迟线路：留空 = 按后台顺序自动显示前几条；填了名字就只显示这些（一行一个）。
   pingLines: "",
   // 备注显示位置：默认两边都摊。
   remarkPlacement: "both",
-  // 地图默认关着（站长的部署口径）：要这个招牌块就在后台打开；面板里那枚开关与设置项
-  // 的默认都是它。关掉是**整块关**（地图不渲染、顶栏那枚开关也一起不出现）。
-  mapOn: false,
   // 明暗默认「随系统」。
   themeMode: "system",
 }
@@ -107,27 +87,12 @@ export function hasSummary(top: ThemeConfig["listTop"]): boolean {
   return top === "summary" || top === "both"
 }
 
-/**
- * 卡片形态这一档的取值，认不出来就 `null`。
- *
- * 两处用：
- *   · `cardStyleOf`（站点设置）：认不出 → 回落默认档；
- *   · 访客自己在顶栏选的那一档：认不出 → `null` = **没选过**，于是跟着站长的设置走。
- *     两者差别就在这一步：设置读坏了要退回一个能用的值，访客的偏好读坏了应该视为"没选"。
- */
-export function cardStyleOrNull(v: unknown): ThemeConfig["cardStyle"] | null {
-  return CARD_STYLES.includes(v as ThemeConfig["cardStyle"]) ? (v as ThemeConfig["cardStyle"]) : null
-}
-
-export function cardStyleOf(v: unknown): ThemeConfig["cardStyle"] {
-  return cardStyleOrNull(v) ?? DEFAULTS.cardStyle
-}
-
 /** 收窄 Hub 存回来的设置。逐项收窄类型；认不出来的值一律回落默认值。 */
 export function normalizeConfig(saved: unknown): ThemeConfig {
   const s = (saved && typeof saved === "object" ? saved : {}) as Record<string, unknown>
+  // ★卡片形态与节点地图已从主题里拿掉（2026-10-30）：库里还留着 cardStyle / mapOn 两个旧键，
+  // 这里**不认**它们 —— 收窄时只挑自己认识的键，旧值自然被忽略，不用清理数据库。
   return {
-    cardStyle: cardStyleOf(s.cardStyle),
     listTop: listTopOf(s.listTop),
     // 留空是有意义的值（= 自动取前几条），空串不能当「没填过」；只有类型不对时才回落。
     pingLines: typeof s.pingLines === "string" ? s.pingLines : DEFAULTS.pingLines,
@@ -135,8 +100,6 @@ export function normalizeConfig(saved: unknown): ThemeConfig {
     remarkPlacement: REMARK_PLACEMENTS.includes(s.remarkPlacement as RemarkPlacement)
       ? (s.remarkPlacement as RemarkPlacement)
       : DEFAULTS.remarkPlacement,
-    // 开关：只认真布尔（写成 "false" 这种字符串不算数）。
-    mapOn: typeof s.mapOn === "boolean" ? s.mapOn : DEFAULTS.mapOn,
     // 四档明暗：认不出来的取值回落默认，别让页面卡在一个不存在的档上。
     themeMode: THEME_MODES.includes(s.themeMode as ThemeMode) ? (s.themeMode as ThemeMode) : DEFAULTS.themeMode,
   }

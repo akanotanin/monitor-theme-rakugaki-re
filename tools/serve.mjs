@@ -1,7 +1,7 @@
 // 本地静态伺服 dist/ + 桩掉 /api/*：不依赖任何远端 hub 也能验主题的渲染与设置项。
 //
 // 用法：node tools/serve.mjs [端口=5199] [config JSON 文件] [nodes JSON 文件] [上游 hub]
-//   node tools/serve.mjs 5199 '{"listTop":"groups","cardStyle":"compact"}'
+//   node tools/serve.mjs 5199 '{"listTop":"groups","pingLines":"北京联通"}'
 //   node tools/serve.mjs 5199 cfg.json ../fake_nodes.json
 //   node tools/serve.mjs 5199 '' '' http://127.0.0.1:28081     # /api/* 转给真 hub（经隧道），静态仍走本机
 //   node tools/serve.mjs 5199 '' '' https://<域名>             # 上游也可以是 https（Node 侧走代理时带

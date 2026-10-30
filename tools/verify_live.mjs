@@ -135,72 +135,37 @@ for (const w of [334, 320]) {
   }
 }
 
-// ② 清单：点行展开延迟 / 点名字进详情。用访客偏好（localStorage）强制切到清单来看，
-//    站点配置一个字不动；跑的是真 React 组件与真接口。
-await send('Page.addScriptToEvaluateOnNewDocument', { source: `try{localStorage.setItem('rakugaki-re:card_style','checklist')}catch(e){}` })
+// ② 手机视口：卡片单列、点卡片能进详情（清单表格形态 2026-10-30 下线，只剩卡片一种）。
 await send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true })
 await send('Page.navigate', { url: `${BASE}/` })
-let hasRows = false
-for (let i = 0; i < 30 && !hasRows; i++) { await sleep(500); hasRows = !!(await evalJS(`document.querySelectorAll('.dg-row').length > 0`)) }
-if (hasRows) {
-  await evalJS(`document.querySelectorAll('.dg-row')[0].click()`)
-  let opened = false
-  for (let i = 0; i < 30 && !opened; i++) { await sleep(450); opened = !!(await evalJS(`document.querySelector('[data-fold] [data-chart] path') !== null`)) }
-  check('清单：点整行展开延迟面板（走势图已画出）', opened === true)
-  const parts = await evalJS(`(() => {
-    const fold = document.querySelector('[data-fold]')
-    if (!fold) return null
-    const ranges = [...fold.querySelectorAll('[aria-label="时间范围"] button')]
-    const legend = [...fold.querySelectorAll('button[aria-pressed]')].filter((b) => !ranges.includes(b))
-    return {
-      ranges: ranges.length,
-      active: ranges.filter((b) => b.getAttribute('aria-pressed') === 'true').length,
-      despike: !!fold.querySelector('[role="checkbox"]'),
-      fullDetail: [...fold.querySelectorAll('button')].some((b) => b.textContent.includes('完整详情')),
-      legend: legend.length,
-    }
-  })()`)
-  check('清单：展开块含范围/削峰/完整详情/图例', !!parts && parts.ranges >= 4 && parts.active === 1 && parts.despike && parts.fullDetail && parts.legend >= 1, JSON.stringify(parts))
-  // 削峰勾选态：未勾选时框里不能有对勾（svg），点一下才出现（点完还原）——
-  // 防「.dg-check 的未分层 color 压过 text-transparent」那类级联层静默失效回潮。
-  const d0 = await evalJS(`(() => { const b = document.querySelector('[data-fold] [role=checkbox]'); return { aria: b && b.getAttribute('aria-checked'), glyph: !!(b && b.querySelector('svg')) } })()`)
-  await evalJS(`document.querySelector('[data-fold] [role=checkbox]').click()`)
-  await sleep(300)
-  const d1 = await evalJS(`(() => { const b = document.querySelector('[data-fold] [role=checkbox]'); return { aria: b && b.getAttribute('aria-checked'), glyph: !!(b && b.querySelector('svg')) } })()`)
-  await evalJS(`document.querySelector('[data-fold] [role=checkbox]').click()`)
-  await sleep(300)
-  check('清单：削峰未勾选不显勾、点后出现（已还原）', d0.aria === 'false' && d0.glyph === false && d1.aria === 'true' && d1.glyph === true, JSON.stringify({ d0, d1 }))
-  const aria = await evalJS(`document.querySelector('.dg-row[aria-expanded="true"]') !== null`)
-  check('清单：展开行 aria-expanded=true', aria === true)
-  await evalJS(`(document.querySelectorAll('.dg-row')[1] || document.querySelectorAll('.dg-row')[0]).click()`)
-  await sleep(600)
-  const folds = await evalJS(`document.querySelectorAll('[data-fold]').length`)
-  check('清单：单开手风琴（同时只开一行）', folds === 1, `folds=${folds}`)
-  const href = await evalJS(`(() => { const a = document.querySelector('.dg-row a.dg-name-link'); if (!a) return null; const h = a.getAttribute('href'); a.click(); return h })()`)
-  await sleep(900)
-  const path = await evalJS(`location.pathname`)
-  check('清单：点名字进详情页', typeof href === 'string' && href.startsWith('/node/') && path === href, `href=${href} path=${path}`)
-} else {
-  console.log('（清单行没出来：站点数据或形态异常，跳过）')
-}
+let cardsReady = false
+for (let i = 0; i < 30 && !cardsReady; i++) { await sleep(500); cardsReady = !!(await evalJS(`document.querySelectorAll('[data-card]').length > 0`)) }
+check('手机：卡片列表渲染出来', cardsReady === true)
+const cols = await evalJS(`(() => { const l = [...document.querySelectorAll('[data-card]')].map((x) => Math.round(x.getBoundingClientRect().left)); return new Set(l).size })()`)
+check('手机：卡片单列（同一左沿，不并排）', cols === 1, `左沿 ${cols} 种`)
+const clicked = await evalJS(`(() => { const c = document.querySelector('[data-card]'); if (!c) return null; c.click(); return true })()`)
+await sleep(900)
+const path = await evalJS(`location.pathname`)
+check('手机：点卡片进详情页', clicked === true && typeof path === 'string' && path.startsWith('/node/'), `path=${path}`)
 
 // ③ 离线沉底（live）：DOM 顺序 == 现场拉 /api/nodes 现算的期望序（在线优先、组内 sort/id）。
 //    与 tools/verify_offline_last.mjs 同口径，这里跑在真站上（站点没有离线机时退化为「在线按 sort」）。
 await send('Page.navigate', { url: `${BASE}/` })
 let listReady = false
-for (let i = 0; i < 40 && !listReady; i++) { await sleep(500); listReady = !!(await evalJS(`document.querySelectorAll('article[data-card][data-node], .dg-row[data-node]').length > 0`)) }
+for (let i = 0; i < 40 && !listReady; i++) { await sleep(500); listReady = !!(await evalJS(`document.querySelectorAll('article[data-card][data-node]').length > 0`)) }
 const O = JSON.parse(await evalJS(`(async () => {
   const api = await (await fetch('/api/nodes')).json()
   const nodes = api.nodes ?? []
   const expected = [...nodes].sort((a, b) => (a.online === b.online ? 0 : a.online ? -1 : 1) || a.sort - b.sort || a.id - b.id).map((n) => n.id)
-  const dom = [...document.querySelectorAll('article[data-card][data-node], .dg-row[data-node]')].map((c) => +c.getAttribute('data-node'))
+  const dom = [...document.querySelectorAll('article[data-card][data-node]')].map((c) => +c.getAttribute('data-node'))
   return JSON.stringify({ expected, dom, offline: nodes.filter((n) => !n.online).length, total: nodes.length })
 })()`) ?? '{}')
 check(`★ 列表顺序 = 在线优先（离线沉底；共 ${O.total} 台 / 离线 ${O.offline} 台）`,
   listReady && Array.isArray(O.dom) && O.dom.length > 0 && JSON.stringify(O.dom) === JSON.stringify(O.expected),
   `期望 ${O.expected?.join(',')} / 实测 ${O.dom?.join(',')}`)
 
-// ④ 详情页连接数（live）：hub 上报 `metrics.tcp / udp` 时两格必须在且是数字；没上报则两格隐身。
+// ④ 详情页连接数（live）：hub 上报 `metrics.tcp / udp` 时那一格必须在、且是「16 / 3」这种写法；
+//    没上报则整格隐身（2026-10-30 与 rakugaki 同步：两格合成一格「TCP / UDP 连接」）。
 const nodeId = await evalJS(`(async () => {
   const api = await (await fetch('/api/nodes')).json()
   const n = (api.nodes ?? []).find((x) => x.online && x.metrics) ?? (api.nodes ?? [])[0]
@@ -212,11 +177,10 @@ if (nodeId) {
   for (let i = 0; i < 40 && !hasFacts; i++) { await sleep(500); hasFacts = !!(await evalJS(`document.querySelectorAll('.dg-fact dt').length > 0`)) }
   const F = JSON.parse(await evalJS(`JSON.stringify(Object.fromEntries([...document.querySelectorAll('.dg-fact dt')].map((d) => [d.textContent.trim(), d.nextElementSibling ? d.nextElementSibling.textContent.trim() : null])))`) ?? '{}')
   const hubHas = await evalJS(`(async () => { const api = await (await fetch('/api/nodes')).json(); const n = (api.nodes ?? []).find((x) => x.id === ${nodeId}); return !!(n && n.metrics && typeof n.metrics.tcp === 'number') })()`)
-  const tcpOk = hubHas ? /^\d+$/.test(F['TCP 连接'] ?? '') : !('TCP 连接' in F)
-  const udpOk = hubHas ? /^\d+$/.test(F['UDP 连接'] ?? '') : !('UDP 连接' in F)
-  check('★ 详情页「TCP 连接」/「UDP 连接」（hub 有上报则在且是数字；没上报则两格隐身）',
-    hasFacts && tcpOk && udpOk,
-    `节点 ${nodeId}：TCP=${F['TCP 连接']} UDP=${F['UDP 连接']} hub带此字段=${hubHas}`)
+  const connOk = hubHas ? /^\d+ \/ \d+$/.test(F['TCP / UDP 连接'] ?? '') : !('TCP / UDP 连接' in F)
+  check('★ 详情页「TCP / UDP 连接」（hub 有上报则在且是「N / M」；没上报则这一格隐身）',
+    hasFacts && connOk && !('TCP 连接' in F) && !('UDP 连接' in F),
+    `节点 ${nodeId}：TCP / UDP 连接=${F['TCP / UDP 连接']} hub带此字段=${hubHas}`)
 } else {
   console.log('（没有节点可开详情页，跳过连接数断言）')
 }

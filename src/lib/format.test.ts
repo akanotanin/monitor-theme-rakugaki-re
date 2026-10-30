@@ -4,7 +4,7 @@
 //
 // Nothing imports it, so the bundle never includes it.
 import {
-  axisBytes, axisTop, bytes, cpuName, daysUntil, despike, osName, pair, quarters, rate, timeTicks, uptime,
+  axisBytes, axisTop, bytes, cpuName, daysUntil, despike, innerTicks, osName, pair, quarters, rate, timeTicks, uptime, zoomSpan,
 } from "./format.ts"
 
 let failed = 0
@@ -138,6 +138,37 @@ eq(uptime(2 * 86400 + 5 * 3600), "2 天 5 小时", "超过一天不再写分钟"
 
 eq(osName("Debian GNU/Linux 12 (bookworm)"), "Debian 12", "发行版名去掉代号")
 eq(cpuName("Intel(R) Xeon(R) CPU E5-2680 8-Core Processor"), "Intel Xeon E5-2680", "CPU 名去掉商标和核数")
+
+// innerTicks / zoomSpan：详情页延迟图「滚轮纵缩 + 拖线平移」那一档的刻度与量程数学
+// （2026-10-30 与 rakugaki 同源口径）。两组边界用例都是上游真踩过的：
+// 上界放开半步会多吐越界刻度（网格线与标签画到绘图区外），跨度下限写成固定 1ms 会让
+// 亚毫秒量程第一格滚轮反而放大、贴 0 时甚至双向卡死。
+{
+  const all = (lo: number, hi: number) => {
+    const t = innerTicks(lo, hi)
+    return t.length > 0 && t.every((v) => v >= lo - 1e-9 && v <= hi + 1e-9)
+  }
+  eq(innerTicks(0, 1000), [0, 250, 500, 750, 1000], "整段量程：0/250/500/750/1000")
+  eq(innerTicks(13.2, 38.2), [15, 20, 25, 30, 35], "窄量程只挑范围内的整齐数（首档只落得下 2 枚就退一档）")
+  eq(all(280, 281.3), true, "压线窄量程：不许吐 281.5 那种越界刻度")
+  eq(all(27.95, 52.95), true, "滚轮缩放后的任意边界：刻度全在范围内")
+  eq(all(0, 1), true, "1ms 下限量程：0/0.25/0.5/0.75/1")
+  eq(innerTicks(3, 3), [], "零跨度：不给刻度（免得画出一堆重叠）")
+  const R = (lo: number, hi: number, anchor: number, ratio: number, factor: number, floor: number, cap = 1e5) =>
+    zoomSpan({ lo, hi, anchor, ratio, factor, floor, cap })
+  const spanOf = (r: { lo: number; hi: number }) => r.hi - r.lo
+  const a1 = R(25, 50, 33, 0.4, 0.02, 1)
+  eq(Math.abs(spanOf(a1) - 1) < 1e-9, true, `收窄到 1ms 下限即停（跨度 ${spanOf(a1)}）`)
+  eq(Math.abs(a1.hi - 33 - 0.6) < 1e-9 && Math.abs(33 - a1.lo - 0.4) < 1e-9, true, "夹到下限时按锚点比例收：锚点在框里仍是 40%")
+  eq(spanOf(R(25, 50, 33, 0.4, 2, 1)), 50, "外滚 2×：25 → 50")
+  const b1 = R(1.1, 1.5, 1.3, 0.5, 0.835, 0.1)
+  eq(spanOf(b1) < 0.4 && spanOf(b1) > 0.3, true, `亚毫秒收窄：0.4 → ${spanOf(b1).toFixed(3)}（旧版会放大到 1.0）`)
+  eq(spanOf(R(0, 0.675, 0.27, 0.75, 1.148, 0.1)) > 0.675, true, "贴 0 外滚：跨度只会变大（旧版原地不动）")
+  eq(R(0, 0.675, 0.1, 0.9, 0.5, 0.1).lo >= 0, true, "下沿不越 0")
+  const c2 = R(900, 1000, 500000, 0.5, 4, 1, 1000)
+  eq(c2.hi <= 1000 && spanOf(c2) > 0, true, "顶端不越 cap、跨度不为负")
+  eq(spanOf(R(0, 0.02, 0.01, 0.5, 4, 1)) > 0.02, true, "比下限还窄的量程：外滚照样变大、不被地板卡住")
+}
 
 if (failed) {
   console.error(`\n${failed} 项不通过`)

@@ -1,7 +1,7 @@
-import { useLayoutEffect, useRef, useState } from "react"
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react"
 
 import { ChartTooltip } from "@/components/ChartTooltip"
-import { clockFor, quarters, timeTicks } from "@/lib/format"
+import { clockFor, innerTicks, quarters, timeTicks, zoomSpan } from "@/lib/format"
 import { wobblePoints } from "@/lib/sketch"
 
 /**
@@ -19,6 +19,11 @@ import { wobblePoints } from "@/lib/sketch"
  *      （横屏一整天的分钟桶）抖动幅度收小，否则会糊成毛边；
  *   ② 网格是稀疏的短虚线、刻度字用 Shantell Sans（手写体）；
  *   ③ 悬停竖线也是虚线（像用尺子比着划的那一道）。
+ *
+ * 交互（2026-10-30 与 rakugaki 同口径）：给了 `wheelZoom` 的那张图（整页详情的延迟图）
+ * 能用**滚轮收放纵向范围**（锚点钉在光标压着的那个值上）、**按住左键拖着线上下平移**、
+ * **双击复位**，右上角另有一枚「重置」。原来那套「横向拖选一段放大」下线 —— 延迟图的
+ * 时间窗口归页签上方那排量程 chip 管，图内只调纵向。
  */
 export type ChartSeries = {
   key: string
@@ -93,6 +98,11 @@ function niceScale(lo: number, hi: number, count = 4): { lo: number; hi: number;
  */
 export const AUTO_MIN_SPAN_RATIO = 0.25
 
+/** 滚轮缩放的跨度下限（单位跟图表走；当前只有延迟图开，= 1ms）：再近就没信息了。 */
+const ZOOM_MIN_SPAN = 1
+/** 滚轮缩放的顶端封顶：1000 与「数据顶端 × 2」取大——爆表值（超时 3000ms 之类）也留得下余地。 */
+const zoomCapOf = (dataHi: number) => Math.max(1000, dataHi * 2)
+
 export function TimeChart({
   rows,
   series,
@@ -101,12 +111,10 @@ export function TimeChart({
   unit = "",
   format,
   yFormat,
-  from = 0,
-  to,
   label,
   domain = "zero",
   left = LEFT,
-  onZoom,
+  wheelZoom,
   renderTooltip,
 }: {
   rows: ChartRow[]
@@ -119,19 +127,22 @@ export function TimeChart({
   unit?: string
   /** 悬停 tooltip 里那个值怎么印（用自绘 tooltip 时可以不传）。 */
   format?: (value: number) => string
-  /** Y 轴刻度怎么印，默认按原样（最多一位小数）。 */
+  /** Y 轴刻度怎么印，默认按刻度步长定小数位。 */
   yFormat?: (value: number) => string
-  /** 只看 `rows[from..to]` 这一段（缩放窗口用，索引是**全量数组**里的下标）。 */
-  from?: number
-  to?: number
   /** 给读屏用的一句话（这张图画的是什么）。 */
   label?: string
   /** `zero`：Y 轴从 0 起；`auto`：按数据自身量程取整齐刻度、且至少摊开 `AUTO_MIN_SPAN_RATIO` 那么宽（延迟轴用——锚 0 会压平起伏、贴着数据缩放又会放大几 ms 的抖动，两头各一道护栏）。 */
   domain?: "zero" | "auto"
   /** 左边留给 Y 轴刻度的宽度。 */
   left?: number
-  /** 给了它就能**在图上横向拖选一段缩放**（索引是全量数组里的下标）。 */
-  onZoom?: (from: number, to: number) => void
+  /**
+   * 给了它（且 `domain="auto"`）就能**用滚轮调整 Y 轴（纵向）范围**：以光标压着的那个
+   * 值为锚点收放（缩放后那个值还钉在同一行像素上）、按住左键拖着线上下平移、双击图表复位；
+   * 夹子两道——跨度最小 `ZOOM_MIN_SPAN`（1ms）、顶端最高 `zoomCapOf(数据顶端)`。
+   * 监听是**非 passive** 的：光标在图上时滚轮归这张图，页面不跟着滚（页面别处照常滚）。
+   * 当前只有整页详情的延迟图开（清单里就地展开的那张不开——列表里滚轮要留给翻列表）。
+   */
+  wheelZoom?: boolean
   /** 自定义悬停内容（延迟图用它接 `PingTooltip`）。 */
   renderTooltip?: (row: ChartRow) => React.ReactNode
 }) {
@@ -141,7 +152,18 @@ export function TimeChart({
   const [hover, setHover] = useState<number | null>(null)
   const [pointerY, setPointerY] = useState<number | null>(null)
   const [tipH, setTipH] = useState(0)
-  const [drag, setDrag] = useState<{ from: number; to: number } | null>(null)
+  // 拖着线平移的基准：按下那一刻的指针 y 与量程（整段拖动都按它算，不跟着每次移动累加）。
+  const panRef = useRef<{ y0: number; lo: number; hi: number; moved: boolean } | null>(null)
+  // 滚轮缩放出来的手动 Y 范围（null = 自动量程）。
+  const [yZoom, setYZoom] = useState<{ lo: number; hi: number } | null>(null)
+  // clipPath 的 id：每张图一个（详情页里五张图会同页共存），`useId` 的冒号等字符剔掉。
+  const cid = useId().replace(/[^a-zA-Z0-9_-]/g, "")
+
+  // 换量程（`hours`）＝整页重新取数：纵向缩放跟它一起回自动（横向由页签上那排 chip 管）。
+  useEffect(() => {
+    // oxlint-disable-next-line react/set-state-in-effect -- 换量程时把上一档的手动量程复位，与取数语义同步
+    setYZoom(null)
+  }, [hours])
 
   useLayoutEffect(() => {
     const h = tip.current?.offsetHeight ?? 0
@@ -158,10 +180,7 @@ export function TimeChart({
     return () => ro.disconnect()
   }, [])
 
-  const last = Math.max(0, rows.length - 1)
-  const a = Math.min(Math.max(Math.round(from), 0), last)
-  const b = Math.min(Math.max(to ?? last, a), last)
-  const view = rows.slice(a, b + 1)
+  const view = rows
 
   const w = size.w
   const h = size.h
@@ -173,22 +192,72 @@ export function TimeChart({
 
   // 刻度：零起点用 quarters(top)；自动档拿数据量程取整齐步长，但量程至少摊开
   // AUTO_MIN_SPAN_RATIO 那么宽（「最近视距」，见常量注释）——窄波动不再被怼满全高。
-  const scale =
+  const autoExtent = extentOf(view, series.map((s) => s.key))
+  const autoScale =
     domain === "auto"
       ? (() => {
-          const [lo, hi] = extentOf(view, series.map((s) => s.key)) ?? [0, 1]
+          const [lo, hi] = autoExtent ?? [0, 1]
           const minSpan = Math.max(hi, 1) * AUTO_MIN_SPAN_RATIO
           if (hi - lo >= minSpan) return niceScale(lo, hi)
           const mid = (lo + hi) / 2
           return niceScale(mid - minSpan / 2, mid + minSpan / 2)
         })()
       : { lo: 0, hi: top > 0 ? top : 1, ticks: quarters(top) }
+  // 手动档（滚轮缩放）：边界就是滚出来的精确值、刻度只挑范围内的整齐数（见 innerTicks）——
+  // 自动档那套「向外扩到整步长」会把锚点随每次滚动蹭走，滚轮手感靠的就是锚点不漂。
+  const scale = yZoom ? { lo: yZoom.lo, hi: yZoom.hi, ticks: innerTicks(yZoom.lo, yZoom.hi) } : autoScale
   const yRange = Math.max(1e-9, scale.hi - scale.lo)
 
   const x = (ts: number) => left + ((ts - t0) / span) * plotW
   const y = (value: number) => TOP + plotH - ((value - scale.lo) / yRange) * plotH
 
-  const yLabel = yFormat ?? ((value: number) => String(Math.round(value * 10) / 10))
+  // 滚轮监听器只装一次，量程与几何从 ref 里现读（渲染期间写 ref 是「最新值」的标准做法，
+  // 放 layout effect 里保证每次渲染后都对齐）。
+  const wheelRef = useRef({ lo: 0, hi: 0, plotH: 0, dataLo: 0, dataHi: 0 })
+  useLayoutEffect(() => {
+    wheelRef.current = { lo: scale.lo, hi: scale.hi, plotH, dataLo: autoExtent?.[0] ?? 0, dataHi: autoExtent?.[1] ?? 0 }
+  })
+  // 滚轮缩放（`wheelZoom` 且 domain=auto）：非 passive（要 preventDefault 住页面滚动），
+  // 光标压着的那个值当锚点收放；夹子两道（跨度 ≥ ZOOM_MIN_SPAN、顶端 ≤ zoomCapOf）。
+  useEffect(() => {
+    const el = box.current
+    if (!el || !wheelZoom || domain !== "auto") return
+    const onWheel = (e: WheelEvent) => {
+      const st = wheelRef.current
+      if (st.plotH <= 0) return
+      e.preventDefault()
+      // deltaMode：0=像素（绝大多数）、1=行、2=页；先归一到「像素」口径。
+      let d = e.deltaY
+      if (e.deltaMode === 1) d *= 16
+      else if (e.deltaMode === 2) d *= 100
+      // 单次事件封顶 ±240：每 100 个滚动单位收放约 14%（e^±0.15），一格滚轮（±100/±120）
+      // 的观感正好，触控板的小步长也顺；猛甩一下最多按 1.43× 走，不会一步飞天。
+      d = Math.max(-240, Math.min(240, d))
+      const f = Math.exp(d * 0.0015)
+      const rect = el.getBoundingClientRect()
+      const ratio = Math.min(Math.max((e.clientY - rect.top - TOP) / st.plotH, 0), 1)
+      // 锚点 = 光标当前压着的那个值。缩放后它还钉在同一行像素上——滚轮「手感」的全部就是这一条。
+      const anchor = st.hi - ratio * (st.hi - st.lo)
+      // 跨度下限：min(1ms, 自动量程的 1/4)。亚毫秒线路的自动量程本来就窄于 1ms，固定 1ms 会把
+      // 第一格滚轮变成「放大 + 锚点跳走」、下沿贴 0 时更会双向卡死（量程数学与三道夹子都挪进
+      // format.ts 的 zoomSpan，配了单测）。
+      const floor = Math.min(ZOOM_MIN_SPAN, Math.max((st.dataHi - st.dataLo) * 0.25, 1e-9))
+      setYZoom(zoomSpan({ lo: st.lo, hi: st.hi, anchor, ratio, factor: f, floor, cap: zoomCapOf(st.dataHi) }))
+    }
+    el.addEventListener("wheel", onWheel, { passive: false })
+    return () => el.removeEventListener("wheel", onWheel)
+  }, [wheelZoom, domain])
+
+  // 默认刻度印法：小数位**跟着刻度步长走**（步长 0.25 就印两位）—— 一位小数会把 0.25 印成
+  // 「0.3」，网格线画在真值上、标签却对不上。
+  const yDigits = (() => {
+    const t = scale.ticks
+    if (t.length < 2) return 1
+    const stepV = Math.abs(t[1] - t[0])
+    for (let d = 0; d <= 3; d++) if (Math.abs(Math.round(stepV * 10 ** d) / 10 ** d - stepV) < stepV * 1e-9) return d
+    return 3
+  })()
+  const yLabel = yFormat ?? ((value: number) => String(Math.round(value * 10 ** yDigits) / 10 ** yDigits))
   const xTicks = view.length > 1 ? timeTicks(t0, t1).filter((t) => t >= t0 && t <= t1) : []
   const clock = clockFor(hours)
   // 撞在一起的刻度标签直接丢掉：按 11px 的近似字宽排一遍，与前一个标签的右沿重叠就不画。
@@ -300,14 +369,23 @@ export function TimeChart({
         payload: hovered as unknown as Record<string, unknown>,
       }))
     : []
-  const zoomed = !!onZoom && (a > 0 || b < last)
-  const sel = drag ? { lo: Math.min(drag.from, drag.to), hi: Math.max(drag.from, drag.to) } : null
+  const zoomed = yZoom !== null
 
   return (
     // `data-chart`：给护栏一个稳定锚点（改版后按类名找的判据会静默变成 0）。
-    <div ref={box} data-chart="" className="relative h-full w-full">
+    /* `select-none`：拖动平移时浏览器会顺手起一个选区、把扫过的文字（右上那枚「重置」）划成
+       黄底。图表这一块没有可选的正文，整块关掉最省事。 */
+    <div ref={box} data-chart="" className="relative h-full w-full select-none">
       {w > 0 && h > 0 && (
         <svg width={w} height={h} role="img" aria-label={label} className="overflow-visible">
+          {/* 绘图区的裁剪框：滚轮把量程缩窄后，超出范围的值不再画到轴外去（留一点溢出到
+              tooltip / 刻度那一圈才要 `overflow-visible`，曲线本身必须夹在框里）。自动档
+              本来就装得下，有它也不变样。折线 / 面积 / 区间三块共用这一条。 */}
+          <defs>
+            <clipPath id={cid}>
+              <rect x={left} y={TOP} width={plotW} height={plotH} />
+            </clipPath>
+          </defs>
           {/* 网格：只画横线，短虚线（像用尺子比着点的）。 */}
           {scale.ticks.map((v) => (
             <line
@@ -322,12 +400,13 @@ export function TimeChart({
               shapeRendering="crispEdges"
             />
           ))}
-          {/* Y 轴刻度（手写体）。 */}
+          {/* Y 轴刻度（手写体）。纵向夹在绘图区里：滚轮缩到很窄时，最上/最下那枚标签
+              不再被顶到图外去（自动档本来就在框内，这一夹对它没有影响）。 */}
           {scale.ticks.map((v) => (
             <text
               key={`y${v}`}
               x={left - 6}
-              y={y(v)}
+              y={Math.min(Math.max(y(v), TOP + 8), TOP + plotH - 8)}
               textAnchor="end"
               dominantBaseline="middle"
               fontSize={FONT}
@@ -351,6 +430,7 @@ export function TimeChart({
               {clock(t)}
             </text>
           ))}
+          <g clipPath={`url(#${cid})`}>
           {series.map((s, si) =>
             s.band ? (
               <path key={`b${s.key}`} d={bandOf(s, 500 + si * 11)} fill={s.color} fillOpacity={0.15} stroke="none" />
@@ -391,8 +471,9 @@ export function TimeChart({
               </g>
             )
           })}
+          </g>
           {/* 悬停竖线。 */}
-          {hovered && !sel && (
+          {hovered && (
             <line
               x1={x(hovered.ts)}
               x2={x(hovered.ts)}
@@ -403,26 +484,15 @@ export function TimeChart({
               strokeWidth={1.2}
             />
           )}
-          {/* 拖选中的那一段（松手才真的缩放）。 */}
-          {sel && view.length > 1 && (
-            <rect
-              x={x(view[sel.lo].ts)}
-              y={TOP}
-              width={Math.max(1, x(view[sel.hi].ts) - x(view[sel.lo].ts))}
-              height={plotH}
-              fill="var(--yellow)"
-              opacity={0.22}
-            />
-          )}
-          {/* 命中层：整块绘图区接指针，按 x 找最近的那个点；给了 onZoom 就能横向拖选缩放。 */}
+          {/* 命中层：整块绘图区接指针，按 x 找最近的那个点；`wheelZoom` 那档还能拖着线上下平移。 */}
           <rect
             x={left}
             y={TOP}
             width={plotW}
             height={plotH}
             fill="transparent"
-            // `pan-y`：手机上竖着划仍然滚页面，只有横向拖才被这里接走。
-            style={onZoom ? { touchAction: "pan-y" } : undefined}
+            // `pan-y`：手机上竖着划仍然滚页面（平移是鼠标手势，触屏不抢）。
+            style={{ touchAction: "pan-y" }}
             onMouseMove={(e) => {
               if (view.length === 0) return
               setHover(indexAt(e.clientX, e.currentTarget))
@@ -434,35 +504,59 @@ export function TimeChart({
               setPointerY(null)
             }}
             onPointerDown={(e) => {
-              if (!onZoom || view.length < 3) return
+              if (!wheelZoom || e.button !== 0 || plotH <= 0) return
+              // 捕获失败不该让整段拖动失效（指针已经消失、或合成事件没有有效 id 时会抛）。
               try { e.currentTarget.setPointerCapture(e.pointerId) } catch { /* 无所谓 */ }
-              const at = indexAt(e.clientX, e.currentTarget)
-              setDrag({ from: at, to: at })
+              // 基准取**当前显示中的**量程：没缩过就是自动档那一段（照样能拖，拖完即手动档）。
+              panRef.current = { y0: e.clientY, lo: scale.lo, hi: scale.hi, moved: false }
             }}
             onPointerMove={(e) => {
-              if (!drag) return
-              setDrag({ ...drag, to: indexAt(e.clientX, e.currentTarget) })
+              const st = panRef.current
+              if (!st) return
+              // 没按住左键却还挂在拖动里（捕获失败 + 松手落在图外那条路径）就当场清掉。
+              if ((e.buttons & 1) === 0) { panRef.current = null; return }
+              const dy = e.clientY - st.y0
+              // 3px 死区：只是点一下不该把量程挪走。
+              if (!st.moved && Math.abs(dy) < 3) return
+              st.moved = true
+              const spanY = st.hi - st.lo
+              // 1px = span/plotH：像素位移原样换算成值位移 —— 线就钉在光标上跟着走。
+              let shift = (dy / plotH) * spanY
+              // 整段一起停（夹的是**位移**，不是各自收边）：下沿不越 0、顶端不越封顶。
+              const cap = Math.max(zoomCapOf(autoExtent?.[1] ?? 0), st.hi)
+              shift = Math.min(Math.max(shift, -st.lo), cap - st.hi)
+              setYZoom({ lo: st.lo + shift, hi: st.hi + shift })
+            }}
+            onPointerCancel={() => {
+              // ★触屏竖划时浏览器接管手势、对这层派发的是 pointercancel（不会再有 pointerup）：
+              //   这里顺手把平移状态也清掉。
+              panRef.current = null
             }}
             onPointerUp={() => {
-              if (!drag || !onZoom) return
-              const lo = Math.min(drag.from, drag.to)
-              const hi = Math.max(drag.from, drag.to)
-              setDrag(null)
-              // 只是点了一下（没拖开）就不动：重置交给那枚「重置」。
-              if (hi - lo >= 2) onZoom(a + lo, a + hi)
+              panRef.current = null
+            }}
+            onDoubleClick={() => {
+              // 双击 = 复位：量程回到自动档，与那枚「重置」按钮同效。
+              setYZoom(null)
             }}
           />
         </svg>
       )}
-      {/* 缩放着的时候给一枚重置。 */}
-      {zoomed && onZoom && (
-        <button
-          type="button"
-          onClick={() => onZoom(0, last)}
-          className="dg-chip tap absolute right-1 top-0 !py-0.5 text-[11px]"
-        >
-          重置
-        </button>
+      {/* 缩放着的时候给一枚重置（滚轮纵缩 + 拖线平移都归位，双击图表同效）。
+          ★不能把 `absolute` 直接挂在按钮上：`.tap { position: relative }` 是**未分层** CSS，
+          按级联层规则它压过分层的工具类 —— 按钮会掉进正常流、跑到图下面去（实测：跑成了
+          左下角一枚被裁掉半截的小纸片）。所以位置交给外面这层 span。 */}
+      {zoomed && (
+        <span className="absolute top-0 right-1">
+          <button
+            type="button"
+            onClick={() => setYZoom(null)}
+            title="重置缩放（双击图表同效）"
+            className="dg-chip tap !py-0.5 text-[11px]"
+          >
+            重置
+          </button>
+        </span>
       )}
       {hovered && (
         <div

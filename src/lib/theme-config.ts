@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react"
 
 import { api } from "@/lib/api"
-import { cardStyleOrNull, DEFAULTS, normalizeConfig, type ThemeConfig } from "@/lib/site-settings"
+import { DEFAULTS, normalizeConfig, type ThemeConfig } from "@/lib/site-settings"
 
 /**
  * 站点级设置：只存 Hub（`/api/themes/<short>/config`），一个站一份，不落访客的浏览器。
@@ -9,80 +9,6 @@ import { cardStyleOrNull, DEFAULTS, normalizeConfig, type ThemeConfig } from "@/
  * 在 `site-settings.ts`（那里能单测），`scripts/check-config.mjs` 在打包前兜底。
  */
 const SHORT = "rakugaki-re"
-
-/**
- * 访客自己的两个偏好：**看不看节点地图**、**列表用哪种卡片形态**。都只存在他自己浏览器里，
- * 不写 hub —— 这与「站点级设置只存 hub、访客偏好才放 localStorage」是同一条规矩。
- * 两者的默认都来自站长的设置：没选过（或存的值读不懂）就跟着设置走。
- *
- * ★ 但地图与卡片形态有一处**不一样**：卡片形态是「列表怎么排」，站长那档无论取哪一档、
- * 那一页都还在；地图是一整块功能。站长在「主题设置 → 节点地图」里关掉 = **这一块关着**
- * （地图不渲染、顶栏那枚开关也不出现，见 `useMapVisible` 的注释）。
- */
-const MAP_KEY = "rakugaki-re:map"
-const CARD_STYLE_KEY = "rakugaki-re:card_style"
-
-/**
- * 节点地图看不看：站长在「主题设置 → 节点地图」里那一档是**闸门**，访客的偏好只在闸门开着时
- * 起作用（默认取站长那一档、他自己动过就以他的为准）。
- *
- * ★ 站长关掉（`siteDefault === false`）时一律是关：地图不渲染，**顶栏那枚开关也不出现**
- * （App.tsx 里按 `config.mapOn` 决定挂不挂那枚按钮）——「面板即事实」：关掉的这一块不该
- * 在页面上留一个点得动却什么也不开的按钮，访客存在自己浏览器里的旧偏好也不许把站长关掉的
- * 整块顶回来。
- *
- * 选成与站长相同的那一档时**把记录删掉**（= 重新「跟着站长走」，以后站长改默认他也跟着变）。
- * 存储被禁用（隐私模式）时这次会话里照样能开关，只是记不住。
- */
-export function useMapVisible(siteDefault: boolean): [boolean, () => void] {
-  const [saved, setSaved] = useState<string | null>(() => {
-    try {
-      return localStorage.getItem(MAP_KEY)
-    } catch {
-      return null
-    }
-  })
-  const on = siteDefault && (saved === null || saved !== "0")
-  return [
-    on,
-    () => {
-      const next = !on
-      const record = next === siteDefault ? null : next ? "1" : "0"
-      try {
-        if (record === null) localStorage.removeItem(MAP_KEY)
-        else localStorage.setItem(MAP_KEY, record)
-      } catch {
-        // 同上：记不住就记不住，界面照常。
-      }
-      setSaved(record)
-    },
-  ] as const
-}
-
-/**
- * 列表用哪种卡片形态。返回的是**最终生效**的那一档与一个选择函数：
- * 访客选的记下来；选成和站长设置一样的那档时**把记录删掉**（= 重新"跟着站长走"，
- * 以后站长改默认，这位访客也会跟着变）。
- */
-export function useCardStyle(siteDefault: ThemeConfig["cardStyle"]): [ThemeConfig["cardStyle"], (next: ThemeConfig["cardStyle"]) => void] {
-  const [picked, setPicked] = useState<ThemeConfig["cardStyle"] | null>(() => {
-    try {
-      return cardStyleOrNull(localStorage.getItem(CARD_STYLE_KEY))
-    } catch {
-      return null
-    }
-  })
-  const choose = (next: ThemeConfig["cardStyle"]) => {
-    setPicked(next === siteDefault ? null : next)
-    try {
-      if (next === siteDefault) localStorage.removeItem(CARD_STYLE_KEY)
-      else localStorage.setItem(CARD_STYLE_KEY, next)
-    } catch {
-      // 记不住就只影响这一次会话：当前这一档仍然会立刻生效。
-    }
-  }
-  return [picked ?? siteDefault, choose]
-}
 
 // 类型、默认值、收窄都在 site-settings.ts；这里只留取数据与页面侧的钩子，
 // 顺手再导出一遍，页面统一从 `@/lib/theme-config` 拿。

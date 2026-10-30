@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react"
-import { ArrowLeft, Check, ChevronRight } from "lucide-react"
+import { ArrowLeft, Check } from "lucide-react"
 
 import { PingTooltip } from "@/components/ChartTooltip"
 import { TimeChart } from "@/components/DoodleChart"
@@ -18,6 +18,11 @@ type Point = {
   disk_used: number
   net_rx: number
   net_tx: number
+  /** 连接条数（hub 1.4.x 起 metrics 桶里带；老 hub 没这两列时留空）。 */
+  tcp?: number
+  udp?: number
+  /** 进程数（同一个桶里也带；老 hub 没有这一列时留空）。 */
+  procs?: number
 }
 // `latency` is the bucket's median round trip, null when every probe in it timed
 // out. `band` is the range its answers spanned, absent when they spanned nothing.
@@ -69,6 +74,10 @@ function Fact({ label, value }: { label: string; value?: string | number | null 
   )
 }
 
+/** 详情页的节点识别色：与列表卡逐张轮换的影子色同一套顺序（见 App.tsx 的 toneOf）。 */
+export const ACCENTS = ["teal", "red", "yellow"] as const
+export type Accent = (typeof ACCENTS)[number]
+
 /**
  * 时间范围 chip：一枚小纸片。
  */
@@ -78,7 +87,10 @@ function Chip({ active, onClick, children }: { active: boolean; onClick: () => v
       type="button"
       aria-pressed={active}
       onClick={onClick}
-      className={`dg-chip tap !px-2.5 !py-0.5 text-[12px] ${active ? "dg-chip-on" : ""}`}
+      // ★与列表页那排「分组」chip 同一尺寸：就用 `.dg-chip` 的默认内边距（4px 11px / 12.5px）。
+      //   早先这里压成 `!px-2.5 !py-0.5 text-[12px]`（高 26），比列表那排矮 4px —— 两页同一类控件
+      //   不该有两种个子。（顶栏那几枚是 36px 的方形工具键，不是同一类东西，不对齐它。）
+      className={`dg-chip tap ${active ? "dg-chip-on" : ""}`}
     >
       {children}
     </button>
@@ -170,9 +182,18 @@ function toPingRows(pingSeries: PingSeries[]) {
   return [...rows.values()].sort((a, b) => a.ts - b.ts)
 }
 
+/**
+ * 一张资源图 = 一张卡（`.dg-panel`：2px 虚线圈 + 歪圆角 + 标记笔硬影子），与列表里那些卡片
+ * 同一副笔触，但不歪头、不贴胶带 —— 这几块是**读**的，不是点开的。
+ *
+ * 此前这五张图是**裸图**：标题一行、图直接画在横格纸面上，全靠留白分块；同一页里上面的规格区
+ * 是散的、下面的图表也散，只有列表页有卡，看着像「图表还没排完版」。包进卡片后每张图自带一个
+ * 落点。内边距 16px、图高仍是 160（h-40）不动：变的只是外面多了一层纸。
+ * 圆角与影子色按 nth-child 奇偶/三张轮换（见 index.css 的 .dg-panel）。
+ */
 function Panel({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div>
+    <div className="dg-panel p-4">
       <h4 className="dg-hand mb-2 text-[13px] font-bold text-ink-2">{title}</h4>
       <div className="h-40 w-full text-ink-3">{children}</div>
     </div>
@@ -182,8 +203,11 @@ function Panel({ title, children }: { title: string; children: React.ReactNode }
 /**
  * 整页详情：翻到这台机器的那一页 —— 页首是身份行与规格（像填过的一张表），
  * 下面是资源 / 网络延迟两个页签与时间范围。图表是手绘版自绘图表（见 DoodleChart）。
+ *
+ * `accent`：这台机器在列表卡上的识别色（App 按卡片在列表里的位置算好传进来），
+ * 图表卡的硬影子与名字下面那道荧光笔痕都跟着它 —— 点进来还是同一个颜色。
  */
-export function NodeDetail({ node, onBack, historyDays, remarkPlacement }: {
+export function NodeDetail({ node, onBack, historyDays, remarkPlacement, accent = "teal" }: {
   node: Node
   /** 「← 回到列表」：回列表页。 */
   onBack: () => void
@@ -191,6 +215,8 @@ export function NodeDetail({ node, onBack, historyDays, remarkPlacement }: {
   historyDays?: number
   /** 「备注显示位置」：整页详情那一块摊不摊备注。 */
   remarkPlacement?: RemarkPlacement
+  /** 节点识别色（列表卡的轮换影子色）。 */
+  accent?: Accent
 }) {
   const chips = remarkChips(node)
   const detailChips = hasDetailRemarks(node, remarkPlacement ?? "both") ? chips : []
@@ -209,9 +235,6 @@ export function NodeDetail({ node, onBack, historyDays, remarkPlacement }: {
   // Retained rather than folded into an empty result: a refused request and an
   // empty window are different answers, and the hub has reason to refuse this one.
   const [failed, setFailed] = useState("")
-  // Where the brush has been dragged, so the axis reticks for the visible span
-  // rather than retaining the whole window's ticks.
-  const [zoom, setZoom] = useState<[number, number] | null>(null)
   const tipRef = useRef<HTMLDivElement | null>(null)
   // 延迟图那块的高度：**撑到视口底**（比一个死高度好看，图例行也刚好落在视口里）。
   // ★必须是定值：容器只靠 min-height 撑的话，里面那层 `h-full` 的百分比高度解析成 0，
@@ -223,7 +246,9 @@ export function NodeDetail({ node, onBack, historyDays, remarkPlacement }: {
       const el = tipRef.current
       if (!el) return
       const top = el.getBoundingClientRect().top + window.scrollY
-      const h = Math.max(288, Math.round(window.innerHeight - top - 16))
+      // ★+36：卡片自己要吃掉 2×2 边框 + 2×16 内边距 —— 底高 288 是**图**的高度，包上卡片后
+      //   同样的 288 会让图矮 36px（rakugaki 那边是同一个坑）。
+      const h = Math.max(288 + 36, Math.round(window.innerHeight - top - 16))
       // oxlint-disable-next-line react/set-state-in-effect -- 量真实 DOM 的活儿只能在 effect/事件里干
       setChartH((prev) => (prev === h ? prev : h))
     }
@@ -237,7 +262,6 @@ export function NodeDetail({ node, onBack, historyDays, remarkPlacement }: {
     // The charts must not continue drawing the old range while the new one is in flight.
     // oxlint-disable-next-line react/set-state-in-effect -- 换范围/页签时先清掉上一档数据，这是取数的既有语义
     setData(null)
-    setZoom(null)
     setFailed("")
     // What this screen can resolve, in device pixels, which is the unit the line is drawn in.
     const points = Math.round(globalThis.innerWidth * (globalThis.devicePixelRatio || 1))
@@ -266,9 +290,18 @@ export function NodeDetail({ node, onBack, historyDays, remarkPlacement }: {
   // Axis tops for the two panels with no capacity to measure against.
   const tops = useMemo(() => {
     const max = (pick: (mm: Point) => number) => metricRows.reduce((hi, mm) => Math.max(hi, pick(mm)), 0)
+    const connTop = axisTop(max((mm) => Math.max(mm.tcp ?? 0, mm.udp ?? 0)), 4, 10)
+    // 进程数给 15% 余量：这条线本来就平，轴顶贴着峰值时整条线会「钉」在图顶、下半张全空。
+    const procTop = axisTop(max((mm) => mm.procs ?? 0) * 1.15, 8, 10)
     return {
       cpu: axisTop(max((mm) => mm.cpu), 4, 10, 100),
       rate: axisTop(max((mm) => Math.max(mm.net_rx, mm.net_tx)), 1024, 1024),
+      // 连接条数没有容量可比：取窗口里两条线的最大值为准；下限 4、不封顶（流量大的机器 tcp 上千是常态）。
+      // 连接数是计数，四分刻度不能带 x.5：axisTop 的阶梯含 1.5 / 2.5 / 7.5，峰值落在 (4,6] / (8,10] / (20,30]
+      // 时轴顶会是 6 / 10 / 30。把轴顶补到 4 的倍数（6→8、10→12、30→32），任何峰值下四分刻度都是整数。
+      conn: connTop + ((4 - (connTop % 4)) % 4),
+      // 进程数同理：下限 8（微型机上 procs 只有十几个，别把轴压成 0~20），轴顶也补到 4 的倍数。
+      procs: procTop + ((4 - (procTop % 4)) % 4),
     }
   }, [metricRows])
 
@@ -287,7 +320,7 @@ export function NodeDetail({ node, onBack, historyDays, remarkPlacement }: {
   const rowByTs = useMemo(() => new Map(pingRows.map((row) => [row.ts, row])), [pingRows])
 
   return (
-    <div data-detail="" className="space-y-4">
+    <div data-detail="" data-accent={accent} className="space-y-4">
       {/* 「翻回上一页」：回列表。 */}
       <button type="button" onClick={onBack} className="dg-hand tap flex items-center gap-1.5 text-[14px] text-ink-2 hover:text-ink">
         <ArrowLeft className="size-4" aria-hidden />
@@ -307,25 +340,28 @@ export function NodeDetail({ node, onBack, historyDays, remarkPlacement }: {
         )}
       </div>
 
-      {/* 规格：一台机器的一张表 —— 每格底下一道虚线，像手填过的横线。 */}
+      {/* 规格：一台机器的一张表 —— 每格底下一道虚线，像手填过的横线。
+          ★次序与 rakugaki 同一口径：系统 → 架构 → TCP / UDP 连接打头（一台机器的「身份」），
+            再是 CPU / 内存 / 今日流量，在线时间收尾，计费与到期殿后。
+          （2026-10-30 试过按「身份 / 用量 / 时长与续费」分三组、并给四格加用量细条，
+            站长看过要求撤回 —— 这里回到不分组的九格原口径。） */}
       <dl className="grid gap-x-6 gap-y-3 md:grid-cols-2 lg:grid-cols-3">
         <Fact label="系统" value={[osName(node.os), node.kernel].filter(Boolean).join(" · ")} />
-        <Fact
-          label="CPU"
-          value={node.cpu_name ? `${cpuName(node.cpu_name)} × ${node.cpu_cores}` : `${node.cpu_cores} 核`}
-        />
-        <Fact label="内存 / 硬盘" value={`${bytes(node.mem_total)} / ${bytes(node.disk_total)}`} />
         <Fact
           label="架构"
           value={[node.arch, node.virt !== "none" ? node.virt : "", m ? `${m.procs} 进程` : ""]
             .filter(Boolean)
             .join(" · ")}
         />
-        {/* 连接数：hub 的实时上报里带着 TCP / UDP 连接条数（`metrics.tcp / udp`，2026-10-14
-            应站长要求加到详情页）。离线机器 `metrics` 是 null，两格随 Fact 的既有口径一起隐身
-            ——「没有这个值」本来就不该占格子。 */}
-        <Fact label="TCP 连接" value={m ? m.tcp : null} />
-        <Fact label="UDP 连接" value={m ? m.udp : null} />
+        {/* 连接数：hub 的实时上报里带着 TCP / UDP 连接条数（`metrics.tcp / udp`）。两格合成**一格**
+            （与 rakugaki 同步），写法照「内存 / 硬盘」那格：标签 `TCP / UDP 连接`、值 `17 / 3`。
+            离线机器 `metrics` 是 null，这一格随 Fact 的既有口径一起隐身 ——「没有这个值」本来就不该占格子。 */}
+        <Fact label="TCP / UDP 连接" value={m ? `${m.tcp} / ${m.udp}` : null} />
+        <Fact
+          label="CPU"
+          value={node.cpu_name ? `${cpuName(node.cpu_name)} × ${node.cpu_cores}` : `${node.cpu_cores} 核`}
+        />
+        <Fact label="内存 / 硬盘" value={`${bytes(node.mem_total)} / ${bytes(node.disk_total)}`} />
         <Fact label="今日流量" value={`↓ ${bytes(node.day_rx)} · ↑ ${bytes(node.day_tx)}`} />
         <Fact label="在线时间" value={onlineFor(node)} />
         {/* 续费信息只在填过价格/到期时出现（与卡面底部那行同一份口径）。 */}
@@ -373,7 +409,7 @@ export function NodeDetail({ node, onBack, historyDays, remarkPlacement }: {
 
       <div ref={tipRef}>
         {!data ? (
-          <div className="space-y-4" aria-busy="true">
+          <div className="dg-panel space-y-4 p-4" aria-busy="true">
             <div className="dg-skel h-4 w-16" />
             <div className="dg-skel h-40 w-full" />
           </div>
@@ -384,8 +420,10 @@ export function NodeDetail({ node, onBack, historyDays, remarkPlacement }: {
             <p className="dg-empty py-8 text-center">这段时间没有延迟数据</p>
           ) : (
             // 高度由上面的 chartH 定（撑到视口底；测量还没跑时先用 62svh 垫着 —— 两者都是定值）。
+            // 整宽那张也包卡片（`.dg-panel`），与资源页签六张同一副纸：顶边中间一条胶带、
+            // 硬影子按卡位取色（它是容器里第一张 → 青），六张资源卡照样各贴各的（2026-10-30 起）。
             <div
-              className="flex min-h-72 flex-col gap-3"
+              className="dg-panel flex flex-col gap-3 p-4"
               style={{ height: chartH ? `${chartH}px` : "62svh" }}
             >
               <div className="min-h-0 w-full flex-1 text-ink-3">
@@ -416,10 +454,9 @@ export function NodeDetail({ node, onBack, historyDays, remarkPlacement }: {
                     domain="auto"
                     unit="ms"
                     left={52}
-                    from={Math.min(zoom?.[0] ?? 0, pingRows.length - 1)}
-                    to={Math.min(zoom?.[1] ?? pingRows.length - 1, pingRows.length - 1)}
-                    // 「在图上横向拖选一段」+ 一枚「重置」。
-                    onZoom={(from, to) => setZoom([from, to])}
+                    // 滚轮收放纵向范围 + 按住左键拖着线上下平移 + 双击复位（与 rakugaki 同口径）；
+                    // 原来那套「横向拖选一段」下线 —— 时间窗口由上面那排量程 chip 管。
+                    wheelZoom
                     label="节点延迟走势"
                     renderTooltip={(row) => (
                       <PingTooltip active label={row.ts} rowByTs={rowByTs} probes={shownProbes} smooth={smooth} style={style} />
@@ -467,7 +504,59 @@ export function NodeDetail({ node, onBack, historyDays, remarkPlacement }: {
         ) : metricRows.length === 0 ? (
           <p className="dg-empty py-8 text-center">这段时间没有历史数据</p>
         ) : (
-          <div className="space-y-5">
+          // 六张卡排成两列三排（窄屏单列）：网络速率 / TCP·UDP ｜ CPU / 进程 ｜ 内存 / 硬盘
+          // —— 按主题成对，读起来一行两件事。卡本身的歪头与硬影子见 .dg-panel 的逐张轮换。
+          <div className="grid gap-5 lg:grid-cols-2">
+            {/* ★次序与 rakugaki 同一口径：网络速率与 TCP / UDP 连接打头（在 CPU 之前），
+                其后 CPU / 内存 / 硬盘；进程卡排在 CPU 旁边（两者都是「算力」那一对）。 */}
+            {/* 速率没有「总量」，所以它像 CPU 那样爬梯子，而不是钉在一个容量上。 */}
+            <Panel title="网络速率">
+              <TimeChart
+                rows={metricRows}
+                series={[
+                  { key: "net_rx", name: "下行", color: "var(--c4)" },
+                  { key: "net_tx", name: "上行", color: "var(--c3)" },
+                ]}
+                hours={hours}
+                top={tops.rate}
+                unit="/s"
+                yFormat={axisBytes}
+                format={(v) => rate(v)}
+                label="网络速率走势"
+              />
+            </Panel>
+
+            {/* TCP / UDP 连接的条数走势：两条线各一个色相（TCP 笔蓝 / UDP 笔粉）。数据就在同一次
+                历史指标（metrics）响应的 `tcp / udp` 两列里（hub 1.4.x 的桶实测带这两个键）；
+                老 hub 缺列时两条线自然断开、什么都不画。口径与其余几张同款，只是不填面积
+                —— 连接数是计数，不是「占了多少容量」。 */}
+            <Panel title="TCP / UDP 连接">
+              <TimeChart
+                rows={metricRows}
+                series={[
+                  { key: "tcp", name: "TCP", color: "var(--c4)" },
+                  { key: "udp", name: "UDP", color: "var(--c6)" },
+                ]}
+                hours={hours}
+                top={tops.conn}
+                label="TCP / UDP 连接数走势"
+              />
+            </Panel>
+
+            {/* 进程数：与 CPU 成对（都是「算力」那一面），按站长要求放在 CPU **左**边——
+                两列布局里左列是「读数类」、右列是「资源类」，进程数落在左列更顺。
+                计数面板，不填面积；轴顶补到 4 的倍数，四分刻度才是整数。
+                老 hub 的桶里没 `procs` 时两条边都留空、只画轴。 */}
+            <Panel title="进程">
+              <TimeChart
+                rows={metricRows}
+                series={[{ key: "procs", name: "进程", color: "var(--c3)" }]}
+                hours={hours}
+                top={tops.procs}
+                label="进程数走势"
+              />
+            </Panel>
+
             <Panel title="CPU">
               <TimeChart
                 rows={metricRows}
@@ -494,23 +583,6 @@ export function NodeDetail({ node, onBack, historyDays, remarkPlacement }: {
               />
             </Panel>
 
-            {/* 速率没有「总量」，所以它像 CPU 那样爬梯子，而不是钉在一个容量上。 */}
-            <Panel title="网络速率">
-              <TimeChart
-                rows={metricRows}
-                series={[
-                  { key: "net_rx", name: "下行", color: "var(--c4)" },
-                  { key: "net_tx", name: "上行", color: "var(--c3)" },
-                ]}
-                hours={hours}
-                top={tops.rate}
-                unit="/s"
-                yFormat={axisBytes}
-                format={(v) => rate(v)}
-                label="网络速率走势"
-              />
-            </Panel>
-
             <Panel title={`硬盘 · ${bytes(node.disk_total)}`}>
               <TimeChart
                 rows={metricRows}
@@ -525,166 +597,6 @@ export function NodeDetail({ node, onBack, historyDays, remarkPlacement }: {
           </div>
         )}
       </div>
-    </div>
-  )
-}
-
-/**
- * 清单行展开的那块「延迟面板」（站长 2026-10-11 要的形态，参考图：时间范围 + 走势图 + 图例）：
- * 范围 chip + 削峰 + 右侧「完整详情 ›」；下面一张多条线路同轴的延迟走势图（超时断开）；
- * 图例点一下藏/显那条线，丢包率缀在名字后面。
- *
- * 与详情页同一套零件（Chip / SketchCheck / TimeChart / PingTooltip / PALETTE），也住在
- * **同一个懒加载 chunk** 里 —— 清单悬停时预热的就是它，展开时几乎立刻能画（本组件只被
- * 清单按需挂载：不展开的行一个字节都不发）。拖选缩放是「完整详情」的活，这里不放。
- */
-export function LatencyFold({ node, historyDays, onOpenDetail }: {
-  node: Node
-  /** hub 的历史保留天数（`/api/me` 的 `history_days`）；老 hub 不给，按 7 天算（见 @/lib/ranges）。 */
-  historyDays?: number
-  /** 「完整详情 ›」：进这台机器的整页详情。 */
-  onOpenDetail: () => void
-}) {
-  const RANGES = rangesFor(historyDays)
-  const [hours, setHours] = useState(6)
-  const [smooth, setSmooth] = useState(false)
-  // 点图例藏/显那条线（与详情页同一口径）。
-  const [hiddenProbes, setHiddenProbes] = useState<number[]>([])
-  const [data, setData] = useState<{ ping: PingPoint[]; probes: Probes; loss?: Loss } | null>(null)
-  // Retained rather than folded into an empty result: a refused request and an
-  // empty window are different answers.
-  const [failed, setFailed] = useState("")
-  useEffect(() => {
-    let active = true
-    // The chart must not continue drawing the old range while the new one is in flight.
-    // oxlint-disable-next-line react/set-state-in-effect -- 换范围时先清掉上一档图，这是取数的既有语义
-    setData(null)
-    setFailed("")
-    // What this screen can resolve, in device pixels, which is the unit the line is drawn in.
-    const points = Math.round(globalThis.innerWidth * (globalThis.devicePixelRatio || 1))
-    api<{ ping: PingPoint[]; probes: Probes; loss?: Loss }>(
-      `/nodes/${node.id}/metrics?hours=${hours}&points=${points}&series=ping`,
-    )
-      .then((next) => { if (active) setData(next) })
-      .catch((e: Error) => {
-        if (active) { setFailed(e.message || "网络错误"); setData({ ping: [], probes: {} }) }
-      })
-    return () => { active = false }
-  }, [node.id, hours])
-
-  const pingSeries = useMemo(() => toPingSeries(data), [data])
-  const shownProbes = useMemo(
-    () => pingSeries.filter((s) => !hiddenProbes.includes(s.id)),
-    [pingSeries, hiddenProbes],
-  )
-  // Keyed on the full list, so a line keeps its shade when others are hidden.
-  const style = (id: number) => PALETTE[pingSeries.findIndex((p) => p.id === id) % PALETTE.length]
-  const pingRows = useMemo(() => toPingRows(pingSeries), [pingSeries])
-  const rowByTs = useMemo(() => new Map(pingRows.map((row) => [row.ts, row])), [pingRows])
-
-  return (
-    <div className="space-y-2">
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-        <div className="dg-tabs" role="group" aria-label="时间范围">
-          {RANGES.map((r) => (
-            <Chip key={r.hours} active={hours === r.hours} onClick={() => setHours(r.hours)}>
-              {r.label}
-            </Chip>
-          ))}
-        </div>
-        <SketchCheck checked={smooth} onChange={setSmooth}>
-          削峰
-        </SketchCheck>
-        <button
-          type="button"
-          onClick={onOpenDetail}
-          className="dg-hand tap ml-auto flex items-center gap-0.5 text-[12.5px] text-ink-3 hover:text-ink"
-        >
-          完整详情
-          <ChevronRight className="size-3.5" aria-hidden />
-        </button>
-      </div>
-
-      {!data ? (
-        <div className="dg-skel h-44 w-full" aria-busy="true" />
-      ) : failed ? (
-        <p className="py-6 text-center text-[13px] text-red-ink" role="alert">读取历史数据失败：{failed}</p>
-      ) : pingSeries.length === 0 ? (
-        <p className="dg-empty py-6 text-center">这段时间没有延迟数据</p>
-      ) : (
-        <>
-          <div className="h-44 w-full text-ink-3 sm:h-52">
-            {shownProbes.length === 0 ? (
-              <p className="py-8 text-center text-[13px]">没有选中任何探测</p>
-            ) : (
-              <TimeChart
-                rows={pingRows}
-                series={[
-                  // 区间（band）只在屏上只有一个探测时画：几条叠在一起会糊成一片。
-                  ...(shownProbes.length === 1
-                    ? shownProbes.map((s) => ({
-                        key: `${smooth ? "c" : "b"}${s.id}`,
-                        name: s.name,
-                        color: style(s.id).stroke,
-                        band: true,
-                      }))
-                    : []),
-                  ...shownProbes.map((s) => ({
-                    key: `${smooth ? "s" : "t"}${s.id}`,
-                    name: s.name,
-                    color: style(s.id).stroke,
-                    dash: style(s.id).dash,
-                  })),
-                ]}
-                hours={hours}
-                // 延迟轴不从 0 起：这些线路活在一条窄带里，锚到 0 会把起伏压平。
-                domain="auto"
-                unit="ms"
-                left={52}
-                label="节点延迟走势"
-                renderTooltip={(row) => (
-                  <PingTooltip active label={row.ts} rowByTs={rowByTs} probes={shownProbes} smooth={smooth} style={style} />
-                )}
-              />
-            )}
-          </div>
-
-          {/* 图下面那排：哪几条线在屏上（点一下藏/显），丢包率挂在名字后面。 */}
-          {(pingSeries.length > 1 || pingSeries.some((s) => s.loss > 0)) && (
-            <div className="flex flex-wrap items-center justify-center gap-1.5">
-              {pingSeries.map((s) => {
-                const shown = !hiddenProbes.includes(s.id)
-                return (
-                  <button
-                    key={s.id}
-                    type="button"
-                    aria-pressed={shown}
-                    onClick={() => setHiddenProbes((h) => (shown ? [...h, s.id] : h.filter((id) => id !== s.id)))}
-                    className={`dg-chip tap !px-2 !py-0.5 text-[12px] ${shown ? "" : "opacity-40"}`}
-                  >
-                    <svg width="14" height="6" className="shrink-0" aria-hidden>
-                      <line
-                        x1="0"
-                        y1="3"
-                        x2="14"
-                        y2="3"
-                        stroke={style(s.id).stroke}
-                        strokeDasharray={style(s.id).dash}
-                        strokeWidth="2.4"
-                      />
-                    </svg>
-                    {s.name}
-                    {/* The line is only what answered, so a probe dropping half its packets draws like a healthy one. */}
-                    {s.loss > 0 && (
-                      <span className="tnum opacity-70">丢 {s.loss < 1 ? "<1" : Math.round(s.loss)}%</span>
-                    )}
-                  </button>
-                )
-              })}
-            </div>
-          )}
-        </>
-      )}
     </div>
   )
 }

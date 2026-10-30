@@ -44,15 +44,3 @@ export function wobblePoints(
   const sy = smooth((i) => raw(i * 2 + 1))
   return pts.map(([x, y], i) => [x + sx[i] * amp, y + sy[i] * amp] as [number, number])
 }
-
-/** 一串点 → SVG 路径（默认不闭合）。 */
-export function polylinePath(pts: Array<[number, number]>, close = false): string {
-  if (pts.length === 0) return ""
-  const d = pts.map(([x, y], i) => `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`).join("")
-  return close ? `${d}Z` : d
-}
-
-/** 一串点 → 抖动过的手绘路径。 */
-export function wobblePath(pts: Array<[number, number]>, seed: number, amp = 0.8, close = false): string {
-  return polylinePath(wobblePoints(pts, seed, amp, close), close)
-}

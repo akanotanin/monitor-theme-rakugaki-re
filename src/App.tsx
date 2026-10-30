@@ -1,16 +1,13 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react"
-import { Map as MapIcon, Moon, Sun, Wrench } from "lucide-react"
+import { Moon, Sun, Wrench } from "lucide-react"
 
-import { CardStyleMenu } from "@/components/CardStyleMenu"
-import { Checklist } from "@/components/Checklist"
 import { FarmIcon } from "@/components/FarmIcon"
-import { MapSheet } from "@/components/MapSheet"
 import { Memo } from "@/components/Memo"
 import { NodeCard } from "@/components/NodeCard"
 import { SearchBox, SearchRow } from "@/components/SearchBox"
 import { api, groupView, useNodes } from "@/lib/api"
 import { searchNodes } from "@/lib/search"
-import { hasGroupTabs, hasSummary, useCardStyle, useLocalFarm, useMapVisible, useThemeConfig } from "@/lib/theme-config"
+import { hasGroupTabs, hasSummary, useLocalFarm, useThemeConfig } from "@/lib/theme-config"
 import { isBeijingNight, resolveDark, type RemarkPlacement, type ThemeMode } from "@/lib/site-settings"
 
 type Me = {
@@ -186,10 +183,8 @@ export default function App() {
   const [open, go] = useNodeRoute()
   // The list's group tab, held here so it survives a visit to a node's page.
   const [group, setGroup] = useState<string | null>(null)
-  // 访客自己的两个偏好（都只存在他自己浏览器里，见 @/lib/theme-config）：
-  // 地图看不看，以及列表用哪种卡片形态 —— 后者没选过时跟着站长的设置走。
-  const [mapOn, toggleMap] = useMapVisible(config.mapOn)
-  const [cardStyle, chooseStyle] = useCardStyle(config.cardStyle)
+  // ★2026-10-30 起访客没有「卡片形态 / 地图显隐」两个偏好可存了：这两块已从主题里拿掉，
+  // 列表只剩涂鸦卡片一种形态，顶栏那两枚图标也一起撤了（见 theme.json 的改动说明）。
   // 顶栏那个搜索框：词与「窄屏那一行展开了没」都留在这儿 —— 进详情页再回来，搜到的那几台还在。
   const [query, setQuery] = useState("")
   const [searchOpen, setSearchOpen] = useState(false)
@@ -273,6 +268,11 @@ export default function App() {
   // 再叠一层搜索（口径见 @/lib/search）：便签与列表一起收窄。
   const found = searchNodes(view.shown, query)
   const listView = { ...view, shown: found.shown }
+  // 详情页的节点识别色：与列表卡逐张轮换的影子色同一套（.dg-cards 的 8n 循环 = teal / red /
+  // yellow 三色轮）。按「卡片在这张列表里的位置」取模，所以点开哪张卡，详情页就是哪个颜色。
+  const accent = (["teal", "red", "yellow"] as const)[
+    Math.max(0, listView.shown.findIndex((n) => n.id === selected?.id)) % 3
+  ]
 
   // 详情页的标签页要写「节点名 · 站名」；数据没到就不要写（占位值只会多闪一跳）。
   useEffect(() => {
@@ -334,22 +334,6 @@ export default function App() {
             >
               <Wrench />
             </a>
-            {open === null && (
-              <CardStyleMenu value={cardStyle} siteDefault={config.cardStyle} onPick={chooseStyle} />
-            )}
-            {/* 地图开关：只长在列表页。站长关掉时整枚按钮都不挂（那一块是关着的）。 */}
-            {open === null && config.mapOn && (
-              <button
-                type="button"
-                className="dg-icon tap globe-toggle"
-                aria-pressed={mapOn}
-                onClick={toggleMap}
-                title={mapOn ? "收起节点地图" : "展开节点地图"}
-                aria-label={mapOn ? "收起节点地图" : "展开节点地图"}
-              >
-                <MapIcon />
-              </button>
-            )}
             {/* 入口图标：本站 `/chicken/` 上真装了那座小鸡农场才出现（自动探测）。 */}
             {farmUrl && (
               <a href={farmUrl} className="dg-icon tap" title="养鸡场" aria-label="养鸡场">
@@ -389,6 +373,7 @@ export default function App() {
             <Suspense fallback={<DetailSkeleton />}>
               <NodeDetail
                 node={selected}
+                accent={accent}
                 onBack={() => go(null)}
                 historyDays={me.history_days}
                 remarkPlacement={config.remarkPlacement}
@@ -400,26 +385,16 @@ export default function App() {
             </p>
           )
         ) : !nodes ? (
-          // 还在等节点列表：骨架按当前形态画。
-          cardStyle === "checklist" ? (
-            <div className="space-y-2">
-              {[0, 1, 2, 3, 4, 5].map((i) => (
-                <div key={i} className="dg-skel h-11" />
-              ))}
-            </div>
-          ) : (
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-              {[0, 1, 2].map((i) => (
-                <div key={i} className="dg-skel h-72" />
-              ))}
-            </div>
-          )
+          // 还在等节点列表：骨架按卡片网格画（形态只剩这一种）。
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {[0, 1, 2].map((i) => (
+              <div key={i} className="dg-skel h-72" />
+            ))}
+          </div>
         ) : (
           <>
             {/* 概览便签：设置里没选它时整个不挂载（不是藏起来）。 */}
             {hasSummary(config.listTop) && <Memo nodes={found.shown} group={view.current} searching={found.active} />}
-            {/* 节点地图：便签之下、列表之上。 */}
-            {mapOn && <MapSheet nodes={view.shown} onOpen={go} />}
             {/* 一台都剩不下时说清楚是谁把它筛没的，并指回去哪儿取消。 */}
             {found.active && found.shown.length === 0 ? (
               <p className="dg-empty py-2">
@@ -434,8 +409,6 @@ export default function App() {
               onOpen={go}
               onWarm={warmDetail}
               latencyLines={config.pingLines}
-              historyDays={me.history_days}
-              cardStyle={cardStyle}
               remarkPlacement={config.remarkPlacement}
             />
           </>
@@ -497,16 +470,13 @@ function useProgressive(total: number, first = 24, step = 12): number {
   return limit
 }
 
-function NodeList({ view, group, onGroup, onOpen, onWarm, latencyLines, historyDays, cardStyle, remarkPlacement }: {
+function NodeList({ view, group, onGroup, onOpen, onWarm, latencyLines, remarkPlacement }: {
   view: ReturnType<typeof groupView>
   group: string | null
   onGroup: (group: string | null) => void
   onOpen: (id: number) => void
   onWarm: () => void
   latencyLines: string
-  /** hub 的历史保留天数：清单展开块那排时间范围按它生成。 */
-  historyDays?: number
-  cardStyle: "doodle" | "checklist"
   remarkPlacement: RemarkPlacement
 }) {
   const { groups, current, shown, tabs, total, showTabs } = view
@@ -536,10 +506,8 @@ function NodeList({ view, group, onGroup, onOpen, onWarm, latencyLines, historyD
       )}
       {total === 0 ? (
         <p className="dg-empty py-16 text-center">还没有节点</p>
-      ) : cardStyle === "checklist" ? (
-        <Checklist nodes={list} onOpen={onOpen} onWarm={onWarm} historyDays={historyDays} />
       ) : (
-        <div data-card-style="doodle" className="dg-cards grid items-start gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        <div className="dg-cards grid items-start gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {list.map((n) => (
             <NodeCard
               key={n.id}

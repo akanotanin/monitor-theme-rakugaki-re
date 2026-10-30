@@ -16,7 +16,7 @@
 //
 // 夹具里有三种要沉底的机器：掉线（Bravo/Delta）、从未接入（Foxtrot，online:false）、
 // 连上但从未上报（Golf，online:true + metrics:null —— 预览站「阿姆斯特丹」那张卡的形状）。
-// 锚点：涂鸦卡片 = `article[data-card][data-node]`、清单行 = `.dg-row[data-node]`（两者同值）。
+// 锚点：涂鸦卡片 = `article[data-card][data-node]`（清单形态已下线，2026-10-30 起只剩这一种）。
 // 用法：cd <repo> && node tools/verify_offline_last.mjs
 import { spawn } from 'node:child_process'
 import { existsSync, readFileSync, statSync } from 'node:fs'
@@ -65,7 +65,7 @@ const server = createServer((req, res) => {
   if (path.startsWith('/api/')) {
     if (path === '/api/me') return json({ authed: false, github: false, public_page: true, site: `http://127.0.0.1:${PORT}`, site_name: '离线沉底', history_days: 30 })
     if (path === '/api/nodes') return json({ nodes })
-    if (path.endsWith('/config')) return json({ cardStyle: 'doodle' })
+    if (path.endsWith('/config')) return json({})
     if (/\/metrics/.test(path)) return json({ metrics: [], ping: [], probes: {}, loss: {} })
     if (path === '/api/flip') { nodes[1] = { ...nodes[1], online: true, metrics: metrics({}), last_seen: Math.floor(Date.now() / 1000), last_seen_ago: 2 }; return json({ ok: true }) }
     return json({})
@@ -99,12 +99,8 @@ const send = (m, p = {}) => new Promise((res) => { const i = ++id; pending.set(i
 const js = async (expr) => (await send('Runtime.evaluate', { expression: expr, returnByValue: true, awaitPromise: true })).result?.result?.value
 await send('Runtime.enable'); await send('Page.enable')
 await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 1400, deviceScaleFactor: 1, mobile: false })
-// 访客偏好：①②④ 钉「涂鸦卡片」、③ 钉「清单表格」——站点配置一个字不动。
-const PIN = (style) => ({ source: `try{localStorage.setItem('rakugaki-re:card_style','${style}')}catch(e){}` })
-await send('Page.addScriptToEvaluateOnNewDocument', PIN('doodle'))
-
-// 列表顺序：涂鸦卡片 article[data-card][data-node] 与清单行 .dg-row[data-node] 共用同一取值。
-const ORDER = `[...document.querySelectorAll('article[data-card][data-node], .dg-row[data-node]')].map((c) => +c.getAttribute('data-node'))`
+// 列表顺序：只剩涂鸦卡片一种形态（清单表格 2026-10-30 下线）。
+const ORDER = `[...document.querySelectorAll('article[data-card][data-node]')].map((c) => +c.getAttribute('data-node'))`
 
 let pass = 0, fail = 0
 const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${extra ? ' — ' + extra : ''}`); if (ok) pass++; else fail++ }
@@ -140,17 +136,12 @@ const g1 = JSON.parse(await js(`JSON.stringify(${ORDER})`) ?? '[]')
 console.log(`    ② 「甲」组顺序: ${g1.join(', ')}（期望 ${EXPECT_G1.join(', ')}）`)
 check('★ 分组页签内同样成立（离线在组内垫底）', clicked === true && JSON.stringify(g1) === JSON.stringify(EXPECT_G1), `点击=${clicked} 顺序=${g1.join(',')}`)
 
-// ③ 清单档：一行一台的清单表格，同一口径。
-await send('Page.addScriptToEvaluateOnNewDocument', PIN('checklist'))
-await send('Page.navigate', { url: `http://127.0.0.1:${PORT}/` })
-const clReady = await waitFor(`document.querySelectorAll('.dg-row[data-node]').length === 7`, 20000)
-const cOrder = JSON.parse(await js(`JSON.stringify(${ORDER})`) ?? '[]')
-console.log(`    ③ 清单档顺序: ${cOrder.join(', ')}（期望 ${EXPECT_ALL.join(', ')}）`)
-check('★ 清单档同一口径（清单里的离线也在最末尾）',
-  clReady && JSON.stringify(cOrder) === JSON.stringify(EXPECT_ALL), cOrder.join(','))
-
 // ④ 动态：Bravo 恢复在线 → 兜底轮询（WS 起不来时每 5s 一次 /api/nodes）把新状态带进来后，
 //    它自己升回在线段（sort1 的位置，Charlie 之前）。
+//    ★先回「全部」那一档再翻：② 点进了分组，列表只剩组内两台（清单档那一趟原本顺带把筛掉的
+//    状态重置了，2026-10-30 删掉清单档后必须自己回来）。
+await send('Page.navigate', { url: `http://127.0.0.1:${PORT}/` })
+await waitFor(`document.querySelectorAll('article[data-card][data-node]').length === 7`, 20000)
 await fetch(`http://127.0.0.1:${PORT}/api/flip`)
 const flipped = await waitFor(`JSON.stringify(${ORDER}) === ${JSON.stringify(JSON.stringify(EXPECT_FLIPPED))}`, 12000)
 const fOrder = JSON.parse(await js(`JSON.stringify(${ORDER})`) ?? '[]')
