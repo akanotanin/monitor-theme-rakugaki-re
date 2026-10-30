@@ -290,6 +290,19 @@ async function shot(name) {
 
 const ok = await openLatency()
 check('详情页「网络延迟」页签画出来了', ok)
+
+// 整宽延迟卡的歪头角度：资源卡是 .8° 那套，这张大卡专门压到 .2°（1200px 宽在 .8° 下两端差 17px，
+// 读坐标时像「纸斜了」）。判据给一带区间：要「看得出是手贴的」又不「明显歪」。
+const tilt = await js(`(() => {
+  const p = document.querySelector('[data-detail] .dg-panel')
+  if (!p) return null
+  const m = getComputedStyle(p).transform
+  if (!m || m === 'none' || !m.startsWith('matrix(')) return null
+  const parts = m.slice(7, -1).split(',').map(Number)
+  return Math.round(Math.atan2(parts[1], parts[0]) * 180 / Math.PI * 100) / 100
+})()`)
+check('⑨ 整宽延迟卡只留一点点歪（0.2~0.45°，站长定的 .3°；资源卡仍是 .8° 那套）',
+  typeof tilt === 'number' && Math.abs(tilt) >= 0.2 && Math.abs(tilt) <= 0.45, `实测 ${tilt}°`)
 await js(`document.querySelector('[data-chart]')?.scrollIntoView({ block: 'center' })`)
 await sleep(400)
 const base = await read()

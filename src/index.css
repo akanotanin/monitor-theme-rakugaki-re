@@ -437,6 +437,11 @@
 .dg-panel:nth-child(6n+5) { --tilt: -.9deg; --panel-tone: var(--red);    --tape: var(--tape-t); --tape-rot: -2.5deg; }
 .dg-panel:nth-child(6n)   { --tilt: .5deg;  --panel-tone: var(--yellow); --tape: var(--tape-y); --tape-rot: 2deg; }
 
+/* 整宽那张延迟卡：角度单独调小。一张 1230px 的大卡在 .8° 下，左右两端要差出 ~17px，
+   读坐标的人会明显觉得「纸是斜的」；站长定的口径是「稍微一点点歪」——压到 .3°（整幅差 ~6px，
+   看得出是手贴上去的一页，又不抢坐标轴的平正感；.2° 试过，反而像「差一点才正」）。 */
+.dg-panel[data-wide] { --tilt: -.3deg; }
+
 /* 详情页的节点识别色：与列表卡「逐张轮换影子色」同一套（teal / red / yellow，按卡片在列表里
    的位置取模，见 App.tsx 传进来的 accent）。★2026-10-30 起这份颜色**只管名字下那道荧光笔痕**
    ——图表卡的影子改成按卡位轮换了（见上面 6n 那组），这里留着是为了「点进来还是同一个颜色」的线索。 */

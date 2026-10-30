@@ -422,7 +422,9 @@ export function NodeDetail({ node, onBack, historyDays, remarkPlacement, accent 
             // 高度由上面的 chartH 定（撑到视口底；测量还没跑时先用 62svh 垫着 —— 两者都是定值）。
             // 整宽那张也包卡片（`.dg-panel`），与资源页签六张同一副纸：顶边中间一条胶带、
             // 硬影子按卡位取色（它是容器里第一张 → 青），六张资源卡照样各贴各的（2026-10-30 起）。
+            // ★`data-wide` = 这张是整宽大卡，歪头角度单独调小（见 index.css 里 [data-wide] 那段）。
             <div
+              data-wide=""
               className="dg-panel flex flex-col gap-3 p-4"
               style={{ height: chartH ? `${chartH}px` : "62svh" }}
             >
